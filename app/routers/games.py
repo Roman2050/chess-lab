@@ -1,6 +1,6 @@
 import asyncio
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -43,5 +43,40 @@ async def load_from_lichess(
     
     return UploadResponse(
         message=f"Games from Lichess have been successfully processed for {username}",
+        stats=stats
+    )
+
+
+@router.post("/upload", response_model=UploadResponse)
+async def upload_pgn_file(
+    file: UploadFile = File(...), 
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Loads games from a standard .pgn file.
+    """
+    # File format validation
+    if not file.filename.lower().endswith(".pgn"):
+        raise HTTPException(status_code=400, detail="Only files with the .pgn extension may be uploaded")
+
+    try:
+        # Read the entire file into memory
+        content = await file.read()
+        raw_pgn = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File encoding error. UTF-8 is expected.")
+
+    parsed_games = await asyncio.to_thread(parse_pgn_text, raw_pgn)
+
+    if not parsed_games:
+        return UploadResponse(
+            message="No valid standard games were found in the file.",
+            stats={"saved_new": 0, "total_processed": 0}
+        )
+
+    stats = await bulk_save_games(db, parsed_games)
+    
+    return UploadResponse(
+        message=f"File {file.filename} successfully processed",
         stats=stats
     )
