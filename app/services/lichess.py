@@ -12,7 +12,8 @@ async def fetch_games_from_lichess(
         "max": max_games,
         "tags": "true",
         "clocks": "false",
-        "evals": "false"
+        "evals": "false",
+        "opening": "true"
     }
     
     if perf_type:
