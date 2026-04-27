@@ -16,7 +16,7 @@ class SortOrder(str, Enum):
     desc = "desc" 
 
 class GameSummary(BaseModel):
-    id: str
+    id: int
     unique_id: str
     white_player: str
     black_player: str
