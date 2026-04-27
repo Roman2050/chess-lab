@@ -2,14 +2,17 @@ import asyncio
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Optional
 
 from app.database import get_async_db
 from app.models.enums import StandardPerfType
-from app.schemas.games import UploadResponse
+from app.models.db import Game
+from app.schemas.games import UploadResponse, PaginatedGames, SortOrder, GameDetail
 from app.services.lichess import fetch_games_from_lichess
 from app.utils.parser import parse_pgn_text
 from app.services.db_manager import bulk_save_games
+from app.services.game_queries import get_filtered_games
 
 
 router = APIRouter(prefix="/games", tags=["Games Integration"])
@@ -80,3 +83,37 @@ async def upload_pgn_file(
         message=f"File {file.filename} successfully processed",
         stats=stats
     )
+
+@router.get("", response_model=PaginatedGames)
+async def get_games_list(
+    limit: int = Query(50, ge=1, le=100, description="Number of games on the page"),
+    offset: int = Query(0, ge=0, description="Skip elements (for pages)"),
+    sort_order: SortOrder = Query(SortOrder.desc, description="Sort (newest or oldest)"),
+    player_name: str | None = Query(None, description="Filter by player nickname (played with white or black)"),
+    winner: str | None = Query(None, description="Filter by winner (White, Black, Draw)"),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get a list of games with pagination and filters (without heavy PGN text).
+    """
+    total, games = await get_filtered_games(db, limit, offset, sort_order, player_name, winner)
+    
+    return PaginatedGames(
+        total_count=total,
+        limit=limit,
+        offset=offset,
+        items=games # SQLAlchemy models will be automatically converted to GameSummary
+    )
+
+@router.get("/{game_id}", response_model=GameDetail)
+async def get_game_by_id(
+    game_id: int, 
+    db: AsyncSession = Depends(get_async_db)
+):
+    result = await db.execute(select(Game).where(Game.id == game_id))
+    game = result.scalar_one_or_none()
+    
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+        
+    return game
