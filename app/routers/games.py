@@ -2,11 +2,13 @@ import asyncio
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Optional
 
 from app.database import get_async_db
 from app.models.enums import StandardPerfType
-from app.schemas.games import UploadResponse, PaginatedGames, SortOrder
+from app.models.db import Game
+from app.schemas.games import UploadResponse, PaginatedGames, SortOrder, GameDetail
 from app.services.lichess import fetch_games_from_lichess
 from app.utils.parser import parse_pgn_text
 from app.services.db_manager import bulk_save_games
@@ -102,3 +104,16 @@ async def get_games_list(
         offset=offset,
         items=games # SQLAlchemy models will be automatically converted to GameSummary
     )
+
+@router.get("/{game_id}", response_model=GameDetail)
+async def get_game_by_id(
+    game_id: int, 
+    db: AsyncSession = Depends(get_async_db)
+):
+    result = await db.execute(select(Game).where(Game.id == game_id))
+    game = result.scalar_one_or_none()
+    
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+        
+    return game
