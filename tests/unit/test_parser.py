@@ -43,3 +43,20 @@ def test_parse_pgn_text_skips_unfinished_games_result_star(sample_pgn_text: str)
 
     assert result == []
 
+
+@pytest.mark.unit
+def test_parse_pgn_text_hashes_unique_id_when_site_not_lichess(sample_pgn_text: str) -> None:
+    non_lichess_site_pgn = sample_pgn_text.replace(
+        '[Site "https://lichess.org/abcdef12"]',
+        '[Site "https://example.com/game/whatever"]',
+    )
+
+    result = parse_pgn_text(non_lichess_site_pgn)
+    assert len(result) == 1
+
+    unique_id = result[0]["unique_id"]
+    assert unique_id != "abcdef12"
+    assert isinstance(unique_id, str)
+    assert len(unique_id) == 64
+    assert all(c in "0123456789abcdef" for c in unique_id)
+
