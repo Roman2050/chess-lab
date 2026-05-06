@@ -60,3 +60,27 @@ def test_parse_pgn_text_hashes_unique_id_when_site_not_lichess(sample_pgn_text: 
     assert len(unique_id) == 64
     assert all(c in "0123456789abcdef" for c in unique_id)
 
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("result_tag", "expected_winner"),
+    [
+        ("0-1", "Black"),
+        ("1/2-1/2", "Draw"),
+    ],
+)
+def test_parse_pgn_text_winner_mapping_for_black_and_draw(
+    sample_pgn_text: str,
+    result_tag: str,
+    expected_winner: str,
+) -> None:
+    # Keep header and movetext result consistent (python-chess may infer header from movetext).
+    pgn = (
+        sample_pgn_text.replace('[Result "1-0"]', f'[Result "{result_tag}"]')
+        .replace(" 1-0\n", f" {result_tag}\n")
+    )
+
+    result = parse_pgn_text(pgn)
+    assert len(result) == 1
+    assert result[0]["winner"] == expected_winner
+
