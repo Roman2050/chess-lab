@@ -20,3 +20,13 @@ def test_parse_pgn_text_happy_path_standard_lichess_site(sample_pgn_text: str) -
     # headers=False in exporter means tags like [Event "..."] should not be present
     assert "[Event " not in pgn_content
     assert "[Site " not in pgn_content
+
+
+@pytest.mark.unit
+def test_parse_pgn_text_skips_non_standard_variant(sample_pgn_text: str) -> None:
+    non_standard_pgn = sample_pgn_text.replace('[Variant "Standard"]', '[Variant "Chess960"]')
+
+    result = parse_pgn_text(non_standard_pgn)
+
+    assert result == []
+
