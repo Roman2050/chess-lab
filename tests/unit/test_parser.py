@@ -106,3 +106,41 @@ def test_parse_pgn_text_parses_multiple_games_in_one_text(sample_pgn_text: str) 
     assert result[1]["unique_id"] == "zzzz9999"
     assert result[1]["winner"] == "Black"
 
+
+@pytest.mark.unit
+def test_parse_pgn_text_winner_is_none_for_unexpected_result(sample_pgn_text: str) -> None:
+    # Intentionally use a non-standard result string and keep it consistent in header + movetext.
+    weird_result = "weird"
+    pgn = (
+        sample_pgn_text.replace('[Result "1-0"]', f'[Result "{weird_result}"]')
+        .replace(" 1-0\n", f" {weird_result}\n")
+    )
+
+    result = parse_pgn_text(pgn)
+    assert len(result) == 1
+    assert result[0]["result"] == weird_result
+    assert result[0]["winner"] is None
+
+
+@pytest.mark.unit
+def test_parse_pgn_text_defaults_unknown_players_and_none_opening_timecontrol() -> None:
+    pgn = (
+        '[Event "Test"]\n'
+        '[Site "https://lichess.org/nositeid"]\n'
+        '[Date "2026.05.06"]\n'
+        '[Result "1-0"]\n'
+        '[Variant "Standard"]\n'
+        "\n"
+        "1. e4 e5 1-0\n"
+    )
+
+    result = parse_pgn_text(pgn)
+    assert len(result) == 1
+
+    game = result[0]
+    # python-chess fills missing player tags with "?" in headers
+    assert game["white_player"] == "?"
+    assert game["black_player"] == "?"
+    assert game["opening_name"] is None
+    assert game["time_control"] is None
+
