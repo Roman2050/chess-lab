@@ -84,3 +84,25 @@ def test_parse_pgn_text_winner_mapping_for_black_and_draw(
     assert len(result) == 1
     assert result[0]["winner"] == expected_winner
 
+
+@pytest.mark.unit
+def test_parse_pgn_text_parses_multiple_games_in_one_text(sample_pgn_text: str) -> None:
+    second_game = (
+        sample_pgn_text.replace('[Site "https://lichess.org/abcdef12"]', '[Site "https://lichess.org/zzzz9999"]')
+        .replace('[White "WhitePlayer"]', '[White "Alice"]')
+        .replace('[Black "BlackPlayer"]', '[Black "Bob"]')
+        .replace('[Result "1-0"]', '[Result "0-1"]')
+        .replace(" 1-0\n", " 0-1\n")
+    )
+
+    combined = sample_pgn_text.rstrip() + "\n\n" + second_game.lstrip()
+
+    result = parse_pgn_text(combined)
+    assert len(result) == 2
+
+    assert result[0]["unique_id"] == "abcdef12"
+    assert result[0]["winner"] == "White"
+
+    assert result[1]["unique_id"] == "zzzz9999"
+    assert result[1]["winner"] == "Black"
+
