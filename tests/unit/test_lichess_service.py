@@ -38,3 +38,37 @@ async def test_fetch_games_from_lichess_sends_expected_query_params_with_perf_ty
         assert params["clocks"] == "false"
         assert params["evals"] == "false"
         assert params["opening"] == "true"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_games_from_lichess_uses_default_perf_type_when_none() -> None:
+    username = "someuser"
+    max_games = 12
+
+    url = f"https://lichess.org/api/games/user/{username}"
+    response_text = "PGN TEXT"
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(url).mock(return_value=httpx.Response(200, text=response_text))
+
+        result = await fetch_games_from_lichess(
+            username=username,
+            max_games=max_games,
+            perf_type=None,
+        )
+
+        assert result == response_text
+
+        assert route.called
+        assert route.call_count == 1
+
+        request = route.calls[0].request
+        params = request.url.params
+
+        assert params["perfType"] == "ultraBullet,bullet,blitz,rapid,classical,correspondence"
+        assert int(params["max"]) == max_games
+        assert params["tags"] == "true"
+        assert params["clocks"] == "false"
+        assert params["evals"] == "false"
+        assert params["opening"] == "true"
