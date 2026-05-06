@@ -72,3 +72,32 @@ async def test_fetch_games_from_lichess_uses_default_perf_type_when_none() -> No
         assert params["clocks"] == "false"
         assert params["evals"] == "false"
         assert params["opening"] == "true"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_games_from_lichess_returns_response_text_on_success() -> None:
+    username = "someuser"
+    url = f"https://lichess.org/api/games/user/{username}"
+
+    response_text = "SOME PGN CONTENT\n\n1. e4 e5 1-0\n"
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(url).mock(return_value=httpx.Response(200, text=response_text))
+
+        result = await fetch_games_from_lichess(username=username)
+
+        assert result == response_text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_games_from_lichess_raises_http_status_error_on_non_2xx() -> None:
+    username = "someuser"
+    url = f"https://lichess.org/api/games/user/{username}"
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(url).mock(return_value=httpx.Response(404, text="Not Found"))
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await fetch_games_from_lichess(username=username)
