@@ -30,3 +30,16 @@ def test_parse_pgn_text_skips_non_standard_variant(sample_pgn_text: str) -> None
 
     assert result == []
 
+
+@pytest.mark.unit
+def test_parse_pgn_text_skips_unfinished_games_result_star(sample_pgn_text: str) -> None:
+    unfinished_pgn = (
+        sample_pgn_text.replace('[Result "1-0"]', '[Result "*"]')
+        # PGN result can also be present in the movetext tail; make it consistent.
+        .replace(" 1-0\n", " *\n")
+    )
+
+    result = parse_pgn_text(unfinished_pgn)
+
+    assert result == []
+
