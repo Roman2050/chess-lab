@@ -35,8 +35,9 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url") or settings.database_url_sync
     context.configure(
-        url=settings.database_url_sync,
+        url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -47,7 +48,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     from sqlalchemy import create_engine
-    connectable = create_engine(settings.database_url_sync)
+    url = config.get_main_option("sqlalchemy.url") or settings.database_url_sync
+    connectable = create_engine(url)
 
     with connectable.connect() as connection:
         context.configure(

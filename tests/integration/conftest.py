@@ -23,11 +23,13 @@ def test_db_env():
 
     By default we reuse docker-compose settings and switch DB_NAME to chess_lab_test.
     """
-    os.environ.setdefault("DB_HOST", "localhost")
-    os.environ.setdefault("DB_PORT", "5432")
-    os.environ.setdefault("DB_USER", "chess")
-    os.environ.setdefault("DB_PASSWORD", "chess")
-    os.environ.setdefault("DB_NAME", "chess_lab_test")
+    # Force test DB settings even if a local `.env` already set DB_*.
+    os.environ["DB_HOST"] = "localhost"
+    # Use the dedicated test Postgres (docker-compose service `db_test`)
+    os.environ["DB_PORT"] = "5433"
+    os.environ["DB_USER"] = "chess"
+    os.environ["DB_PASSWORD"] = "chess"
+    os.environ["DB_NAME"] = "chess_lab_test"
     yield
 
 
@@ -60,8 +62,16 @@ async def migrated_db(async_db_url, test_db_env):
             await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
     await admin_engine.dispose()
 
-    # Run migrations using sync URL env vars expected by app/alembic env.py
+    # Run migrations using a URL explicitly set in Alembic config.
+    user = os.environ["DB_USER"]
+    password = os.environ["DB_PASSWORD"]
+    host = os.environ["DB_HOST"]
+    port = os.environ["DB_PORT"]
+    name = os.environ["DB_NAME"]
+    sync_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
+
     cfg = _alembic_config()
+    cfg.set_main_option("sqlalchemy.url", sync_url)
     command.upgrade(cfg, "head")
 
     yield
@@ -73,6 +83,15 @@ async def async_session(async_db_url, migrated_db):
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with Session() as session:
+        # Guard rail: never allow destructive cleanup on a non-test database.
+        db_name = os.environ.get("DB_NAME", "")
+        db_port = os.environ.get("DB_PORT", "")
+        if not db_name.endswith("_test") or db_port != "5433":
+            raise RuntimeError(
+                f"Refusing to run integration test DB cleanup on DB_NAME={db_name!r}, DB_PORT={db_port!r}. "
+                "Expected a dedicated test DB (name endswith '_test' and port 5433)."
+            )
+
         # Ensure clean state between tests; otherwise UNIQUE constraints may fail
         # across reruns or multiple tests.
         await session.execute(text("TRUNCATE TABLE games RESTART IDENTITY CASCADE"))
