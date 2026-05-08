@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     DB_USER: str
     DB_PASSWORD: str
     DB_NAME: str
+    # Optional settings that may exist in local `.env` during development.
+    # Keeping them here prevents pydantic-settings from failing on unknown keys.
+    redis_url: str | None = None
+    stockfish_path: str | None = None
 
     @computed_field
     @property
