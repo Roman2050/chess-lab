@@ -1,0 +1,84 @@
+import os
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+
+def _alembic_config() -> Config:
+    repo_root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(repo_root / "alembic"))
+    return cfg
+
+
+@pytest.fixture(scope="session")
+def test_db_env():
+    """
+    Integration tests need a real Postgres.
+
+    By default we reuse docker-compose settings and switch DB_NAME to chess_lab_test.
+    """
+    os.environ.setdefault("DB_HOST", "localhost")
+    os.environ.setdefault("DB_PORT", "5432")
+    os.environ.setdefault("DB_USER", "chess")
+    os.environ.setdefault("DB_PASSWORD", "chess")
+    os.environ.setdefault("DB_NAME", "chess_lab_test")
+    yield
+
+
+@pytest.fixture(scope="session")
+def async_db_url(test_db_env) -> str:
+    user = os.environ["DB_USER"]
+    password = os.environ["DB_PASSWORD"]
+    host = os.environ["DB_HOST"]
+    port = os.environ["DB_PORT"]
+    name = os.environ["DB_NAME"]
+    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
+
+
+@pytest_asyncio.fixture
+async def migrated_db(async_db_url, test_db_env):
+    """
+    Ensure test DB exists and Alembic migrations applied.
+    """
+    # Create DB if missing (connect to postgres maintenance DB)
+    maintenance_url = async_db_url.rsplit("/", 1)[0] + "/postgres"
+    db_name = async_db_url.rsplit("/", 1)[1]
+
+    admin_engine = create_async_engine(maintenance_url, isolation_level="AUTOCOMMIT")
+    async with admin_engine.connect() as conn:
+        exists = await conn.scalar(
+            text("SELECT 1 FROM pg_database WHERE datname = :name"),
+            {"name": db_name},
+        )
+        if not exists:
+            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+    await admin_engine.dispose()
+
+    # Run migrations using sync URL env vars expected by app/alembic env.py
+    cfg = _alembic_config()
+    command.upgrade(cfg, "head")
+
+    yield
+
+
+@pytest_asyncio.fixture
+async def async_session(async_db_url, migrated_db):
+    engine = create_async_engine(async_db_url, pool_pre_ping=True)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with Session() as session:
+        # Ensure clean state between tests; otherwise UNIQUE constraints may fail
+        # across reruns or multiple tests.
+        await session.execute(text("TRUNCATE TABLE games RESTART IDENTITY CASCADE"))
+        await session.commit()
+        yield session
+        await session.rollback()
+
+    await engine.dispose()
+

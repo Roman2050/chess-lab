@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import computed_field
+from pydantic_settings import SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -8,6 +9,10 @@ class Settings(BaseSettings):
     DB_USER: str
     DB_PASSWORD: str
     DB_NAME: str
+    redis_url: str | None = None
+    stockfish_path: str | None = None
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @computed_field
     @property
@@ -27,8 +32,4 @@ class Settings(BaseSettings):
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8" 
-
 settings = Settings()   
