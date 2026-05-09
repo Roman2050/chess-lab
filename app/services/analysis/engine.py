@@ -52,9 +52,11 @@ class StockfishEngine:
         moves = list(game.mainline_moves())
         out: list[dict] = []
 
+        # NOTE: MultiPV is managed automatically by python-chess and must be
+        # passed per-call to `engine.analyse(..., multipv=N)` (see
+        # `_best_eval_cp`). Calling `engine.configure({"MultiPV": ...})` here
+        # raises EngineError: "cannot set MultiPV which is automatically managed".
         with chess.engine.SimpleEngine.popen_uci(self._path) as engine:
-            engine.configure({"MultiPV": _MULTIPV_LINES})
-
             for ply, move in enumerate(moves, start=1):
                 eval_before = self._best_eval_cp(engine, board)
                 side = board.turn
