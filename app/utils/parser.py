@@ -1,4 +1,6 @@
 import io
+from datetime import datetime
+
 import chess.pgn
 import hashlib
 
@@ -52,6 +54,7 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
             "black_player": headers.get("Black", "Unknown"),
             "result": result,
             "winner": winner,
+            "date_played": datetime.strptime(headers.get("Date", None), "%Y.%m.%d").date(),
             "opening_name": headers.get("Opening", None),
             "time_control": headers.get("TimeControl", None),
             "pgn_content": clean_pgn,
