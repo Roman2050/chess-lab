@@ -13,6 +13,7 @@ from app.services.lichess import fetch_games_from_lichess
 from app.utils.parser import parse_pgn_text
 from app.services.db_manager import bulk_save_games
 from app.services.game_queries import get_filtered_games
+from app.tasks.celery_app import analyze_game
 
 
 router = APIRouter(prefix="/games", tags=["Games Integration"])
@@ -117,3 +118,28 @@ async def get_game_by_id(
         raise HTTPException(status_code=404, detail="Game not found")
         
     return game
+
+
+@router.post("/{game_id}/analyze")
+async def enqueue_game_analysis(
+    game_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Enqueue a Stockfish analysis task for a single game.
+
+    Per ARCHITECTURE.md §6/§7, this hands off to a Celery worker via Redis;
+    the actual engine work happens in `app.tasks.celery_app.analyze_game`.
+    """
+    result = await db.execute(select(Game).where(Game.id == game_id))
+    game = result.scalar_one_or_none()
+
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    if game.is_analyzed:
+        raise HTTPException(status_code=400, detail="Game has already been analyzed")
+
+    analyze_game.delay(game_id)
+
+    return {"status": "queued", "game_id": game_id}

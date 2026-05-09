@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import date
 
 class UploadStats(BaseModel):
@@ -30,6 +30,8 @@ class GameSummary(BaseModel):
 
 class GameDetail(GameSummary):
     pgn_content: str
+    is_analyzed: bool = False
+    analysis_data: Optional[Any] = None
 
 class PaginatedGames(BaseModel):
     total_count: int = Field(description="Total number of games based on these filters")
