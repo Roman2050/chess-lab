@@ -1,14 +1,33 @@
+import hashlib
 import io
 from datetime import datetime
 
+import chess
 import chess.pgn
-import hashlib
+
+from app.services.eco import EcoLookup, get_eco_lookup
+
+
+def _resolve_opening_name(game: chess.pgn.Game, eco_lookup: EcoLookup) -> str:
+    """Walk the mainline and return the deepest ECO match, falling back to 'Unknown'."""
+    board = chess.Board()
+    last_match: str | None = None
+    for move in game.mainline_moves():
+        board.push(move)
+        hit = eco_lookup.lookup(board)
+        if hit is not None:
+            last_match = hit["name"]
+        elif last_match is not None:
+            # Left the opening tree — no need to keep scanning the rest of the game
+            break
+    return last_match or "Unknown"
 
 
 def parse_pgn_text(pgn_text: str) -> list[dict]:
     """Parses PGN text and returns a list of databases containing game data."""
     games_data = []
     pgn_io = io.StringIO(pgn_text)
+    eco_lookup = get_eco_lookup()
 
     while True:
         game = chess.pgn.read_game(pgn_io)
@@ -48,6 +67,13 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
         elif result == "1/2-1/2":
             winner = "Draw"
 
+        # Prefer the PGN Opening tag when present; otherwise enrich via local ECO lookup
+        opening_tag = headers.get("Opening")
+        if opening_tag and opening_tag.strip():
+            opening_name = opening_tag
+        else:
+            opening_name = _resolve_opening_name(game, eco_lookup)
+
         games_data.append({
             "unique_id": unique_id,
             "white_player": headers.get("White", "Unknown"),
@@ -55,7 +81,7 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
             "result": result,
             "winner": winner,
             "date_played": datetime.strptime(headers.get("Date", None), "%Y.%m.%d").date(),
-            "opening_name": headers.get("Opening", None),
+            "opening_name": opening_name,
             "time_control": headers.get("TimeControl", None),
             "pgn_content": clean_pgn,
         })

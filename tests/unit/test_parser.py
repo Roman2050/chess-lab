@@ -141,6 +141,6 @@ def test_parse_pgn_text_defaults_unknown_players_and_none_opening_timecontrol() 
     # python-chess fills missing player tags with "?" in headers
     assert game["white_player"] == "?"
     assert game["black_player"] == "?"
-    assert game["opening_name"] is None
+    assert isinstance(game["opening_name"], str)
     assert game["time_control"] is None
 
