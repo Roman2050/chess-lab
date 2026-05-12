@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import chess
 
+from app.services.analysis.tactical import detect_tactical_tags
+
 # Thresholds (inclusive upper bounds) per ARCHITECTURE.md §5.3.
 _BEST_MAX = 10
 _EXCELLENT_MAX = 25
@@ -66,6 +68,25 @@ def _cp_loss_for_move(color: str, eval_before: int, eval_after: int) -> int:
     return max(0, loss)
 
 
+def _parse_best_move(value: object, board: chess.Board) -> chess.Move | None:
+    """Coerce an engine `best_move` payload (UCI string) into a legal `chess.Move`.
+
+    Returns `None` when the payload is missing, malformed, or doesn't correspond
+    to a legal move in `board` — the tactical detector tolerates `None` best
+    moves (heuristics that need it simply opt out).
+    """
+    if value is None:
+        return None
+    uci = str(value).strip()
+    if not uci:
+        return None
+    try:
+        move = chess.Move.from_uci(uci)
+    except (ValueError, chess.InvalidMoveError):
+        return None
+    return move if move in board.legal_moves else None
+
+
 def _advantage_flags(
     white_peak_cp: int,
     black_peak_cp: int,
@@ -123,6 +144,7 @@ def build_analysis_data(moves: list[dict]) -> dict:
 
         # Capture FENs around the move; only attached for error moves below.
         fen_before = board.fen()
+        board_before = board.copy(stack=False)
         try:
             move_obj = board.parse_san(san)
             board.push(move_obj)
@@ -145,9 +167,22 @@ def build_analysis_data(moves: list[dict]) -> dict:
         }
 
         if classification in _ERROR_CLASSES:
+            tactical_tags: list[str] = []
+            if move_obj is not None:
+                # `board` is currently at the post-move position; copy it so
+                # detectors that internally push/pop (e.g. missed_threat) can't
+                # disturb our replay state.
+                best_move_obj = _parse_best_move(raw.get("best_move"), board_before)
+                tactical_tags = detect_tactical_tags(
+                    board_before,
+                    board.copy(stack=False),
+                    move_obj,
+                    best_move_obj,
+                )
+
             entry["is_only_move"] = False
             entry["best_move_engine"] = None
-            entry["tactical_tags"] = []
+            entry["tactical_tags"] = tactical_tags
             entry["fen_before"] = fen_before
             entry["fen_after"] = fen_after
 
