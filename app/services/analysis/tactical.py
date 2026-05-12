@@ -66,10 +66,48 @@ def _detect_hanging_piece(
     best_move: chess.Move | None,
 ) -> str | None:
     """`hanging_piece`: the played move left one of our own pieces attacked and undefended."""
-    # TODO: Phase 3 — on `board_after`, find friendly pieces (of the side that
-    # just moved) that are attacked by the opponent and have no defenders, or
-    # where the cheapest attacker is worth less than the piece.
-    pass
+    piece_values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+    }
+
+    # After `move` was played, it's the opponent's turn on `board_after`,
+    # so the side that just moved (our side) is the opposite color.
+    own_color = not board_after.turn
+    opponent_color = board_after.turn
+
+    for square in chess.SQUARES:
+        piece = board_after.piece_at(square)
+        if piece is None or piece.color != own_color:
+            continue
+
+        piece_value = piece_values.get(piece.piece_type)
+        if piece_value is None:
+            continue
+
+        if not board_after.is_attacked_by(opponent_color, square):
+            continue
+
+        if board_after.is_attacked_by(own_color, square):
+            continue
+
+        # Skip "equal trades": only flag when the cheapest attacker is worth
+        # strictly less than the hanging piece.
+        attacker_values = [
+            piece_values[board_after.piece_at(att_sq).piece_type]
+            for att_sq in board_after.attackers(opponent_color, square)
+            if board_after.piece_at(att_sq).piece_type in piece_values
+        ]
+        if not attacker_values:
+            continue
+
+        if piece_value > min(attacker_values):
+            return "hanging_piece"
+
+    return None
 
 
 def _detect_missed_threat(
