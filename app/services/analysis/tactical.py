@@ -94,10 +94,60 @@ def _detect_missed_pin(
     best_move: chess.Move | None,
 ) -> str | None:
     """`missed_pin`: `best_move` could have pinned an enemy piece to its king/queen."""
-    # TODO: Phase 3 — after replaying `best_move`, scan rays from the moved
-    # sliding piece for an enemy piece with the enemy king or queen directly
-    # behind it on the same ray.
-    pass
+    if best_move is None:
+        return None
+
+    piece_values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+        chess.KING: 100,
+    }
+
+    test_board = board_before.copy()
+    test_board.push(best_move)
+
+    # After pushing `best_move`, it's the opponent's turn on `test_board`,
+    # so our slider (the would-be pinner) is the opposite color.
+    opponent_color = test_board.turn
+
+    attacker_square = best_move.to_square
+    attacker_piece = test_board.piece_at(attacker_square)
+    if attacker_piece is None:
+        return None
+
+    # Only sliding pieces (bishop, rook, queen) can deliver a pin.
+    if attacker_piece.piece_type not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
+        return None
+
+    attacker_value = piece_values[attacker_piece.piece_type]
+
+    for target_sq in test_board.attacks(attacker_square):
+        target = test_board.piece_at(target_sq)
+        if target is None or target.color != opponent_color:
+            continue
+
+        target_value = piece_values.get(target.piece_type)
+        if target_value is None:
+            continue
+
+        # Absolute pin to the enemy king — let python-chess do the ray geometry.
+        if not test_board.is_pinned(opponent_color, target_sq):
+            continue
+
+        # Make sure our slider is the one delivering the pin, not some other
+        # piece already on the same line.
+        if attacker_square not in test_board.pin(opponent_color, target_sq):
+            continue
+
+        # A pin only matters tactically when the pinned piece is worth more
+        # than the pinner; otherwise the defender just trades it off.
+        if target_value > attacker_value:
+            return "missed_pin"
+
+    return None
 
 
 def _detect_hanging_piece(
