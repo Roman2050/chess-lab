@@ -207,8 +207,84 @@ def _detect_missed_threat(
     move: chess.Move,
     best_move: chess.Move | None,
 ) -> str | None:
-    """`missed_threat`: opponent had a clear threat in `board_before` that `move` did not parry."""
-    # TODO: Phase 3 — detect threats present in `board_before` (e.g. mate-in-1,
-    # winning capture for the opponent on their next move) and check that they
-    # remain available in `board_after`.
-    pass
+    """`missed_threat`: opponent had a clear threat in `board_before` that `move` failed to parry."""
+    piece_values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+    }
+
+    # In `board_before` it's our turn — so `is_check()` and `is_attacked_by(opponent, ...)`
+    # describe threats against us.
+    our_color = board_before.turn
+    opponent_color = not our_color
+
+    def find_undefended_valuable(board: chess.Board) -> list[int]:
+        """Squares of our rooks/queens attacked by the opponent and not defended."""
+        hanging: list[int] = []
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece is None or piece.color != our_color:
+                continue
+            value = piece_values.get(piece.piece_type)
+            if value is None or value < 5:
+                continue
+            if not board.is_attacked_by(opponent_color, square):
+                continue
+            if board.is_attacked_by(our_color, square):
+                continue
+            hanging.append(square)
+        return hanging
+
+    def opponent_has_winning_check(board: chess.Board) -> bool:
+        """True if it's opponent's turn and they have a mate or a check that captures a piece worth >=3."""
+        if board.turn != opponent_color:
+            return False
+        for opp_move in board.legal_moves:
+            captured = board.piece_at(opp_move.to_square)
+            captured_value = (
+                piece_values.get(captured.piece_type, 0)
+                if captured is not None and captured.color == our_color
+                else 0
+            )
+            board.push(opp_move)
+            try:
+                if board.is_checkmate():
+                    return True
+                if board.is_check() and captured_value >= 3:
+                    return True
+            finally:
+                board.pop()
+        return False
+
+    def threat_remaining(board: chess.Board) -> bool:
+        """A clear opponent threat (hanging rook/queen, or a winning check) still exists."""
+        if find_undefended_valuable(board):
+            return True
+        if opponent_has_winning_check(board):
+            return True
+        return False
+
+    # --- 1. Detect threats present in `board_before` ---
+    king_in_check_before = board_before.is_check()
+    hanging_before = find_undefended_valuable(board_before)
+
+    if not king_in_check_before and not hanging_before:
+        return None
+
+    # --- 2. Check whether the threat survived `move` ---
+    if not threat_remaining(board_after):
+        return None
+
+    # --- 3. Confirm via `best_move` (when available) ---
+    # If even the engine's recommendation couldn't neutralise the threat, it
+    # wasn't really avoidable — don't penalise the played move.
+    if best_move is not None:
+        test_board = board_before.copy()
+        test_board.push(best_move)
+        if threat_remaining(test_board):
+            return None
+
+    return "missed_threat"
