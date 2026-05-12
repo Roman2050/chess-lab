@@ -40,10 +40,51 @@ def _detect_missed_fork(
     best_move: chess.Move | None,
 ) -> str | None:
     """`missed_fork`: `best_move` would have attacked 2+ undefended enemy pieces."""
-    # TODO: Phase 3 — replay `best_move` on a copy of `board_before`, enumerate
-    # squares attacked by the moved piece, count enemy pieces on those squares
-    # that have no defenders. Fire when count >= 2.
-    pass
+    if best_move is None:
+        return None
+
+    piece_values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+        chess.KING: 100,
+    }
+
+    test_board = board_before.copy()
+    test_board.push(best_move)
+
+    # After pushing `best_move`, it's the opponent's turn on `test_board`,
+    # so the piece that just moved (our attacker) is the opposite color.
+    opponent_color = test_board.turn
+
+    attacker_square = best_move.to_square
+    attacker_piece = test_board.piece_at(attacker_square)
+    if attacker_piece is None:
+        return None
+
+    attacker_value = piece_values.get(attacker_piece.piece_type)
+    if attacker_value is None:
+        return None
+
+    targets = 0
+    for sq in test_board.attacks(attacker_square):
+        target = test_board.piece_at(sq)
+        if target is None or target.color != opponent_color:
+            continue
+
+        target_value = piece_values.get(target.piece_type)
+        if target_value is None:
+            continue
+
+        is_defended = test_board.is_attacked_by(opponent_color, sq)
+        if not is_defended or target_value < attacker_value:
+            targets += 1
+
+    if targets >= 2:
+        return "missed_fork"
+    return None
 
 
 def _detect_missed_pin(
