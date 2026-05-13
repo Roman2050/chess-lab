@@ -59,7 +59,7 @@ position for training without storing megabytes of redundant data.
 ```
 chess-lab/
 ├── app/
-│   ├── config.py              # Pydantic Settings: DB_*, redis_url, stockfish_path
+│   ├── config.py              # Pydantic Settings: DB_*, redis_url, STOCKFISH_*
 │   ├── database.py            # async + sync engines, session factories, Base
 │   ├── main.py                # FastAPI app instance, router registration
 │   ├── models/
@@ -95,7 +95,7 @@ chess-lab/
 ├── pyproject.toml             # Dependencies, pytest config, build system
 ├── ARCHITECTURE.md            # This file — always read at start of new chat
 └── .env                       # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
-                               # REDIS_URL, STOCKFISH_PATH
+                               # REDIS_URL, STOCKFISH_*
 ```
 
 ---
@@ -287,5 +287,17 @@ DB_USER=chess
 DB_PASSWORD=chess
 DB_NAME=chess_lab
 REDIS_URL=redis://localhost:6379/0
+
+# Stockfish — only STOCKFISH_PATH is required; the rest fall back to safe
+# defaults defined in app/config.py.
 STOCKFISH_PATH=/usr/local/bin/stockfish
+STOCKFISH_DEPTH=20         # search depth per position (1..40)
+STOCKFISH_MULTIPV=2        # PV lines; needed for is_only_move detection (1..10)
+STOCKFISH_THREADS=1        # UCI option, set once at engine startup (1..128)
+STOCKFISH_HASH_MB=128      # UCI option, transposition table size (1..16384 MB)
 ```
+
+`STOCKFISH_DEPTH` and `STOCKFISH_MULTIPV` are passed per-call to
+`engine.analyse(...)`. `STOCKFISH_THREADS` / `STOCKFISH_HASH_MB` are applied
+once via `engine.configure({...})` after process startup, and are silently
+skipped if the underlying UCI binary doesn't expose them (e.g. some forks).

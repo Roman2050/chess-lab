@@ -6,8 +6,10 @@ import chess
 import chess.engine
 import chess.pgn
 
-_DEPTH = 20
-_MULTIPV_LINES = 2
+# Internal sentinel for "mate in N" — converts python-chess `MateGiven` /
+# `Mate(N)` into a finite cp value so downstream cp_loss arithmetic stays
+# simple. This is a contract between engine.py and classifier.py, not a
+# user-facing tuning knob, so it intentionally stays out of Settings.
 _MATE_CP = 10000
 
 
@@ -26,10 +28,50 @@ def _pov_to_white_cp(pov: chess.engine.PovScore) -> int:
 
 
 class StockfishEngine:
-    """Sync UCI Stockfish wrapper for full-game analysis (MultiPV search)."""
+    """Sync UCI Stockfish wrapper for full-game analysis (MultiPV search).
 
-    def __init__(self, path: str) -> None:
+    All tuning parameters are injected at construction time so this class
+    stays decoupled from `app.config.settings` — callers (Celery task, tests)
+    build the instance with whatever values they want. Keyword-only args
+    after `path` prevent accidental positional reordering when adding more
+    knobs later.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        *,
+        depth: int = 20,
+        multipv: int = 2,
+        threads: int = 1,
+        hash_mb: int = 128,
+    ) -> None:
         self._path = path
+        self._depth = depth
+        self._multipv = multipv
+        self._threads = threads
+        self._hash_mb = hash_mb
+
+    def _configure_uci_options(self, engine: chess.engine.SimpleEngine) -> None:
+        """Apply per-engine UCI options (Threads, Hash) once after startup.
+
+        Names match official Stockfish (case-sensitive). For UCI engines that
+        don't expose a given option (forks, Lc0, custom builds) we silently
+        skip it instead of failing — `engine.options` is the authoritative
+        list of what `configure()` will accept.
+
+        MultiPV is intentionally NOT set here: python-chess manages it
+        automatically and rejects `configure({"MultiPV": N})` with an
+        EngineError. It's passed per-call to `engine.analyse(..., multipv=N)`
+        in `_analyse_position` instead.
+        """
+        overrides: dict[str, int] = {}
+        if "Threads" in engine.options:
+            overrides["Threads"] = self._threads
+        if "Hash" in engine.options:
+            overrides["Hash"] = self._hash_mb
+        if overrides:
+            engine.configure(overrides)
 
     def _analyse_position(
         self, engine: chess.engine.SimpleEngine, board: chess.Board
@@ -42,8 +84,8 @@ class StockfishEngine:
         """
         infos = engine.analyse(
             board,
-            chess.engine.Limit(depth=_DEPTH),
-            multipv=_MULTIPV_LINES,
+            chess.engine.Limit(depth=self._depth),
+            multipv=self._multipv,
         )
         primary = infos[0] if isinstance(infos, list) else infos
 
@@ -64,11 +106,8 @@ class StockfishEngine:
         moves = list(game.mainline_moves())
         out: list[dict] = []
 
-        # NOTE: MultiPV is managed automatically by python-chess and must be
-        # passed per-call to `engine.analyse(..., multipv=N)` (see
-        # `_best_eval_cp`). Calling `engine.configure({"MultiPV": ...})` here
-        # raises EngineError: "cannot set MultiPV which is automatically managed".
         with chess.engine.SimpleEngine.popen_uci(self._path) as engine:
+            self._configure_uci_options(engine)
             for ply, move in enumerate(moves, start=1):
                 # Analyse the pre-move position once: we need both the score
                 # (for cp_loss) and the engine's recommendation (for

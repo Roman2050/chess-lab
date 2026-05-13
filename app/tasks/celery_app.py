@@ -27,7 +27,7 @@ def analyze_game(game_id: int) -> None:
     """
     logger.info("analyze_game: starting for game_id=%s", game_id)
 
-    if not settings.stockfish_path:
+    if not settings.STOCKFISH_PATH:
         logger.error(
             "analyze_game: STOCKFISH_PATH is not configured; aborting game_id=%s",
             game_id,
@@ -40,7 +40,13 @@ def analyze_game(game_id: int) -> None:
             logger.warning("analyze_game: game_id=%s not found, skipping", game_id)
             return None
 
-        engine = StockfishEngine(settings.stockfish_path)
+        engine = StockfishEngine(
+            settings.STOCKFISH_PATH,
+            depth=settings.STOCKFISH_DEPTH,
+            multipv=settings.STOCKFISH_MULTIPV,
+            threads=settings.STOCKFISH_THREADS,
+            hash_mb=settings.STOCKFISH_HASH_MB,
+        )
         raw_moves = engine.analyse_game(game.pgn_content)
 
         game.analysis_data = build_analysis_data(raw_moves)
