@@ -15,11 +15,15 @@ async def get_filtered_games(
     stmt = select(Game)
     
     if player_name:
+        name_lower = player_name.lower()
         stmt = stmt.where(
-            or_(Game.white_player == player_name, Game.black_player == player_name)
+            or_(
+                func.lower(Game.white_player) == name_lower,
+                func.lower(Game.black_player) == name_lower,
+            )
         )
     if winner:
-        stmt = stmt.where(Game.winner == winner)
+        stmt = stmt.where(func.lower(Game.winner) == winner.lower())
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total_count = await db.scalar(count_stmt)
