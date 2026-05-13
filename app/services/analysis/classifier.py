@@ -110,15 +110,15 @@ def build_analysis_data(moves: list[dict]) -> dict:
     Input format (from `StockfishEngine.analyse_game`):
         [{"ply", "san", "color", "eval_before", "eval_after"}, ...]
 
-    Output matches ARCHITECTURE.md §5.3. Per §3.4, the FEN fields and
-    `tactical_tags` are emitted **only** for inaccuracy/mistake/blunder moves;
-    quiet moves stay lightweight.
+    Output matches ARCHITECTURE.md §5.3. Per §3.4, the FEN fields,
+    `best_move_engine`, and `tactical_tags` are emitted **only** for
+    inaccuracy/mistake/blunder moves; quiet moves stay lightweight.
 
     SAN is replayed on a `chess.Board` here (not in engine.py) so we can attach
     `fen_before` / `fen_after` to error moves without inflating the engine API.
-    `is_only_move`, `best_move_engine`, and `tactical_tags` are populated with
-    placeholder defaults — they will be filled in by Phase 3 (tactical
-    detector + MultiPV gap analysis).
+    The engine ships `best_move` as UCI (e.g. ``"e2e4"``); we convert it to SAN
+    on `board_before` for storage. `is_only_move` is still a Phase-3 placeholder
+    pending MultiPV gap analysis.
     """
     board = chess.Board()
     enriched: list[dict] = []
@@ -167,12 +167,16 @@ def build_analysis_data(moves: list[dict]) -> dict:
         }
 
         if classification in _ERROR_CLASSES:
+            best_move_obj = _parse_best_move(raw.get("best_move"), board_before)
+            best_move_san = (
+                board_before.san(best_move_obj) if best_move_obj is not None else None
+            )
+
             tactical_tags: list[str] = []
             if move_obj is not None:
                 # `board` is currently at the post-move position; copy it so
                 # detectors that internally push/pop (e.g. missed_threat) can't
                 # disturb our replay state.
-                best_move_obj = _parse_best_move(raw.get("best_move"), board_before)
                 tactical_tags = detect_tactical_tags(
                     board_before,
                     board.copy(stack=False),
@@ -181,7 +185,7 @@ def build_analysis_data(moves: list[dict]) -> dict:
                 )
 
             entry["is_only_move"] = False
-            entry["best_move_engine"] = None
+            entry["best_move_engine"] = best_move_san
             entry["tactical_tags"] = tactical_tags
             entry["fen_before"] = fen_before
             entry["fen_after"] = fen_after

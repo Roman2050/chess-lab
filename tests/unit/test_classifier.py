@@ -79,6 +79,71 @@ def test_acpl_weighted() -> None:
 
 
 @pytest.mark.unit
+def test_best_move_engine_propagated_as_san_for_error_moves() -> None:
+    """Engine's UCI `best_move` is stored as SAN on error moves only.
+
+    Raw row simulates `StockfishEngine.analyse_game` output: a White inaccuracy
+    on move 1 plus a quiet Black reply. `best_move` on the inaccuracy is given
+    in UCI (`e2e4`) and must surface as `best_move_engine="e4"` on the entry;
+    the quiet move must not gain the field at all (ARCHITECTURE.md §3.4).
+    """
+    raw_moves = [
+        # cp_loss=60 → inaccuracy; engine recommends 1.e4.
+        {
+            "ply": 1, "san": "Nf3", "color": "White",
+            "eval_before": 30, "eval_after": -30,
+            "best_move": "e2e4",
+        },
+        # cp_loss=0 → best; should stay lightweight.
+        {
+            "ply": 2, "san": "e5", "color": "Black",
+            "eval_before": -30, "eval_after": -30,
+            "best_move": "e7e5",
+        },
+    ]
+
+    data = build_analysis_data(raw_moves)
+    moves = data["moves"]
+
+    assert moves[0]["classification"] == "inaccuracy"
+    assert moves[0]["best_move_engine"] == "e4"
+
+    assert moves[1]["classification"] == "best"
+    assert "best_move_engine" not in moves[1]
+
+
+@pytest.mark.unit
+def test_best_move_engine_falls_back_to_none_on_invalid_uci() -> None:
+    """Malformed / illegal UCI from the engine is tolerated.
+
+    If the engine packet is degraded (no PV, garbage string, or a UCI that's
+    illegal in `board_before`), we still emit the entry — `best_move_engine`
+    just stays `None` and tactical detectors that need it opt out.
+    """
+    raw_moves = [
+        # Illegal in the starting position (no piece on h2 going to h5).
+        {
+            "ply": 1, "san": "Nf3", "color": "White",
+            "eval_before": 30, "eval_after": -30,
+            "best_move": "h2h5",
+        },
+        {
+            "ply": 2, "san": "Nf6", "color": "Black",
+            "eval_before": -30, "eval_after": 80,
+            "best_move": "not-a-uci-string",
+        },
+    ]
+
+    data = build_analysis_data(raw_moves)
+    moves = data["moves"]
+
+    assert moves[0]["classification"] == "inaccuracy"
+    assert moves[0]["best_move_engine"] is None
+    assert moves[1]["classification"] == "mistake"
+    assert moves[1]["best_move_engine"] is None
+
+
+@pytest.mark.unit
 def test_acpl_handles_empty_move_list() -> None:
     data = build_analysis_data([])
 

@@ -31,17 +31,29 @@ class StockfishEngine:
     def __init__(self, path: str) -> None:
         self._path = path
 
-    def _best_eval_cp(self, engine: chess.engine.SimpleEngine, board: chess.Board) -> int:
+    def _analyse_position(
+        self, engine: chess.engine.SimpleEngine, board: chess.Board
+    ) -> tuple[int, str | None]:
+        """Run one MultiPV search and return `(eval_cp, best_move_uci)`.
+
+        `best_move_uci` is the first move of the top-line PV in UCI notation
+        (e.g. ``"e2e4"``), or `None` if Stockfish returned no PV for this
+        position (mate / stalemate or a degraded info packet).
+        """
         infos = engine.analyse(
             board,
             chess.engine.Limit(depth=_DEPTH),
             multipv=_MULTIPV_LINES,
         )
         primary = infos[0] if isinstance(infos, list) else infos
+
         score = primary.get("score")
-        if score is None:
-            return 0
-        return _pov_to_white_cp(score)
+        eval_cp = _pov_to_white_cp(score) if score is not None else 0
+
+        pv = primary.get("pv") or []
+        best_move_uci = pv[0].uci() if pv else None
+
+        return eval_cp, best_move_uci
 
     def analyse_game(self, pgn_content: str) -> list[dict]:
         game = chess.pgn.read_game(io.StringIO(pgn_content))
@@ -58,13 +70,17 @@ class StockfishEngine:
         # raises EngineError: "cannot set MultiPV which is automatically managed".
         with chess.engine.SimpleEngine.popen_uci(self._path) as engine:
             for ply, move in enumerate(moves, start=1):
-                eval_before = self._best_eval_cp(engine, board)
+                # Analyse the pre-move position once: we need both the score
+                # (for cp_loss) and the engine's recommendation (for
+                # `best_move_engine` / tactical detector). The post-move
+                # analyse only feeds `eval_after`, so we discard its PV.
+                eval_before, best_move_uci = self._analyse_position(engine, board)
                 side = board.turn
                 color = "White" if side == chess.WHITE else "Black"
                 san = board.san(move)
 
                 board.push(move)
-                eval_after = self._best_eval_cp(engine, board)
+                eval_after, _ = self._analyse_position(engine, board)
 
                 out.append(
                     {
@@ -73,6 +89,7 @@ class StockfishEngine:
                         "color": color,
                         "eval_before": eval_before,
                         "eval_after": eval_after,
+                        "best_move": best_move_uci,
                     }
                 )
 
