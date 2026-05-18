@@ -151,3 +151,69 @@ def test_acpl_handles_empty_move_list() -> None:
     assert data["summary"]["white_acpl"] == 0
     assert data["summary"]["black_acpl"] == 0
     assert data["summary"]["advantage_lost"] == {"white": False, "black": False}
+
+
+# Reusable short opening for the phase tests below: 1.e4 e5 2.Nf3 Nc6 3.Bc4 Bc5
+# 4.O-O Nf6 5.d3 d6. Five plies in we're still developing; from ply 7 onward
+# four minors have left the back rank, so detect_phase flips to "middlegame".
+_PHASE_RAW_MOVES: list[dict] = [
+    {"ply": 1,  "san": "e4",  "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 2,  "san": "e5",  "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 3,  "san": "Nf3", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 4,  "san": "Nc6", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 5,  "san": "Bc4", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 6,  "san": "Bc5", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 7,  "san": "O-O", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 8,  "san": "Nf6", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 9,  "san": "d3",  "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 10, "san": "d6",  "color": "Black", "eval_before": 0, "eval_after": 0},
+]
+
+
+@pytest.mark.unit
+def test_phase_present_on_every_move() -> None:
+    """Every move entry must carry a `phase` field with a valid label.
+
+    Unlike `fen_before` / `best_move_engine` (error-only per §3.4), `phase`
+    is universal — quiet best moves still need it for downstream aggregation.
+    """
+    data = build_analysis_data(_PHASE_RAW_MOVES)
+
+    moves = data["moves"]
+    assert len(moves) == len(_PHASE_RAW_MOVES)
+
+    for move in moves:
+        assert "phase" in move
+        assert move["phase"] in ("opening", "middlegame", "endgame")
+
+
+@pytest.mark.unit
+def test_phase_boundaries_present() -> None:
+    """Summary exposes the two phase boundary plies as ints."""
+    data = build_analysis_data(_PHASE_RAW_MOVES)
+
+    boundaries = data["summary"]["phase_boundaries"]
+    assert set(boundaries.keys()) == {"opening_end_ply", "middlegame_end_ply"}
+    assert isinstance(boundaries["opening_end_ply"], int)
+    assert isinstance(boundaries["middlegame_end_ply"], int)
+
+
+@pytest.mark.unit
+def test_phase_consistency() -> None:
+    """Phases progress monotonically in chess time.
+
+    Once a position is classified as middlegame (or endgame), the next ply
+    cannot fall back to opening — development can only grow, queens can only
+    leave the board, and the ply counter only advances. This guards against
+    accidental phase oscillations from a future detector tweak.
+    """
+    data = build_analysis_data(_PHASE_RAW_MOVES)
+
+    _RANK: dict[str, int] = {"opening": 0, "middlegame": 1, "endgame": 2}
+    moves = data["moves"]
+
+    for prev, curr in zip(moves, moves[1:]):
+        assert _RANK[curr["phase"]] >= _RANK[prev["phase"]], (
+            f"phase regressed at ply {curr['ply']}: "
+            f"{prev['phase']!r} → {curr['phase']!r}"
+        )
