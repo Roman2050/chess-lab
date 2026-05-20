@@ -8,6 +8,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Game
 
 
+async def get_player_games(
+    db: AsyncSession,
+    player_name: str,
+    time_control: str | None = None,
+) -> list[Game]:
+    """Fetch every game the player participated in, analyzed or not.
+
+    Used by aggregations whose primary signal doesn't require engine output
+    (win-rate, opening frequency). Caller is responsible for filtering on
+    ``is_analyzed`` when it does — see :func:`get_player_analyzed_games` for
+    the narrower variant.
+    """
+    stmt = select(Game).where(
+        or_(
+            Game.white_player == player_name,
+            Game.black_player == player_name,
+        ),
+    )
+
+    if time_control is not None:
+        stmt = stmt.where(Game.time_control == time_control)
+
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_player_analyzed_games(
     db: AsyncSession,
     player_name: str,
