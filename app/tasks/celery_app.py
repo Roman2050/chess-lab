@@ -40,6 +40,15 @@ def analyze_game(game_id: int) -> None:
             logger.warning("analyze_game: game_id=%s not found, skipping", game_id)
             return None
 
+        # Idempotency guard: the batch endpoint may enqueue the same game twice
+        # before the worker drains the queue. Stockfish is the most expensive
+        # operation in the system — a repeated run is unacceptable.
+        if game.is_analyzed:
+            logger.info(
+                "analyze_game: game_id=%s already analyzed, skipping", game_id
+            )
+            return None
+
         engine = StockfishEngine(
             settings.STOCKFISH_PATH,
             depth=settings.STOCKFISH_DEPTH,
