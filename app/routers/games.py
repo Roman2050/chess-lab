@@ -9,10 +9,23 @@ from app.database import get_async_db
 from app.models.enums import StandardPerfType
 from app.models.db import Game
 from app.schemas.games import UploadResponse, PaginatedGames, SortOrder, GameDetail
+from app.schemas.stats import (
+    PlayerStats,
+    OpeningStat,
+    MoveAccuracyStat,
+)
 from app.services.lichess import fetch_games_from_lichess
 from app.utils.parser import parse_pgn_text
 from app.services.db_manager import bulk_save_games
 from app.services.game_queries import get_filtered_games
+from app.services.aggregation.helpers import get_player_analyzed_games
+from app.services.aggregation.acpl import compute_player_acpl
+from app.services.aggregation.accuracy import (
+    compute_accuracy_by_phase,
+    get_accuracy_by_move_number,
+)
+from app.services.aggregation.openings import get_opening_stats
+from app.services.aggregation.errors import compute_error_patterns
 from app.tasks.celery_app import analyze_game
 
 
@@ -143,3 +156,71 @@ async def enqueue_game_analysis(
     analyze_game.delay(game_id)
 
     return {"status": "queued", "game_id": game_id}
+
+
+@router.get("/stats/{player_name}", response_model=PlayerStats)
+async def get_player_stats(
+    player_name: str,
+    time_control: str | None = None,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Aggregated statistics for a single player: ACPL, accuracy by phase and
+    error patterns. All three read the same analyzed-games set, so we fetch it
+    once and run the (pure, in-memory) aggregations on it — sharing a single
+    AsyncSession across concurrent tasks is unsafe and also re-queried the same
+    rows three times.
+    """
+    games = await get_player_analyzed_games(db, player_name, time_control)
+
+    acpl = compute_player_acpl(games, player_name)
+    accuracy_by_phase = compute_accuracy_by_phase(games, player_name)
+    errors = compute_error_patterns(games, player_name)
+
+    has_acpl = acpl["games_count"] > 0
+    has_accuracy = any(phase["moves_count"] > 0 for phase in accuracy_by_phase.values())
+    has_errors = bool(errors["errors_by_piece"]) or bool(errors["errors_by_move_number"])
+
+    if not (has_acpl or has_accuracy or has_errors):
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    return PlayerStats(
+        acpl=acpl,
+        accuracy_by_phase=accuracy_by_phase,
+        errors=errors,
+    )
+
+
+@router.get("/stats/{player_name}/openings", response_model=list[OpeningStat])
+async def get_player_opening_stats(
+    player_name: str,
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Per-opening statistics for a player, top `limit` by number of games.
+    """
+    rows = await get_opening_stats(db, player_name, limit)
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    return rows
+
+
+@router.get("/stats/{player_name}/moves", response_model=list[MoveAccuracyStat])
+async def get_player_move_stats(
+    player_name: str,
+    min_games: int = Query(5, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Accuracy metrics for a player aggregated by move number, keeping only move
+    numbers reached in at least `min_games` games.
+    """
+    rows = await get_accuracy_by_move_number(db, player_name, min_games)
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    return rows

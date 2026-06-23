@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import chess
 
+from app.services.analysis.phase import detect_phase
 from app.services.analysis.tactical import detect_tactical_tags
 
 # Thresholds (inclusive upper bounds) per ARCHITECTURE.md §5.3.
@@ -132,6 +133,13 @@ def build_analysis_data(moves: list[dict]) -> dict:
     black_peak_cp = 0
     final_eval_cp = 0
 
+    # Track the last ply we saw each phase on so the summary can expose phase
+    # boundaries without a second pass over `enriched`. `middlegame_end_ply`
+    # falls back to `opening_end_ply` when no middlegame ever materialised
+    # (e.g. an early queen trade snaps opening → endgame).
+    opening_end_ply = 0
+    middlegame_end_ply = 0
+
     for raw in moves:
         ply = int(raw["ply"])
         san = str(raw["san"])
@@ -145,6 +153,9 @@ def build_analysis_data(moves: list[dict]) -> dict:
         # Capture FENs around the move; only attached for error moves below.
         fen_before = board.fen()
         board_before = board.copy(stack=False)
+        # Phase is classified from `board_before`: the move is judged in the
+        # context of the position it was played from, not the resulting one.
+        phase = detect_phase(board_before, ply)
         try:
             move_obj = board.parse_san(san)
             board.push(move_obj)
@@ -164,7 +175,13 @@ def build_analysis_data(moves: list[dict]) -> dict:
             "eval_after": eval_after,
             "cp_loss": cp_loss,
             "classification": classification,
+            "phase": phase,
         }
+
+        if phase == "opening":
+            opening_end_ply = ply
+        elif phase == "middlegame":
+            middlegame_end_ply = ply
 
         if classification in _ERROR_CLASSES:
             best_move_obj = _parse_best_move(raw.get("best_move"), board_before)
@@ -206,6 +223,12 @@ def build_analysis_data(moves: list[dict]) -> dict:
     white_acpl = round(white_loss_sum / white_count) if white_count else 0
     black_acpl = round(black_loss_sum / black_count) if black_count else 0
 
+    # If the game never entered middlegame (e.g. opening → endgame via an
+    # early queen trade) we collapse `middlegame_end_ply` onto the opening
+    # boundary so consumers don't have to special-case "missing" phases.
+    if middlegame_end_ply == 0:
+        middlegame_end_ply = opening_end_ply
+
     return {
         "summary": {
             "white_acpl": white_acpl,
@@ -213,6 +236,10 @@ def build_analysis_data(moves: list[dict]) -> dict:
             "advantage_lost": _advantage_flags(
                 white_peak_cp, black_peak_cp, final_eval_cp
             ),
+            "phase_boundaries": {
+                "opening_end_ply": opening_end_ply,
+                "middlegame_end_ply": middlegame_end_ply,
+            },
         },
         "moves": enriched,
     }
