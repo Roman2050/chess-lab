@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.db import Game
 from app.services.aggregation.helpers import (
     get_player_analyzed_games,
     iter_player_moves,
@@ -16,6 +17,12 @@ async def get_player_acpl(
     player_name: str,
     time_control: str | None = None,
 ) -> dict:
+    """Fetch the player's analyzed games and compute their ACPL breakdown."""
+    games = await get_player_analyzed_games(db, player_name, time_control)
+    return compute_player_acpl(games, player_name)
+
+
+def compute_player_acpl(games: list[Game], player_name: str) -> dict:
     """Aggregate a player's ACPL with color and phase breakdowns.
 
     The overall ACPL is the **mean of per-game ACPLs** (each game first
@@ -36,8 +43,6 @@ async def get_player_acpl(
     reached the endgame) return ``None`` rather than ``0`` so the caller can
     tell "no data" apart from "averaged out to zero".
     """
-    games = await get_player_analyzed_games(db, player_name, time_control)
-
     if not games:
         return _empty_result(player_name)
 

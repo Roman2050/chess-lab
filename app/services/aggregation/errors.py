@@ -4,6 +4,7 @@ from collections import Counter
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.db import Game
 from app.services.aggregation.helpers import (
     get_player_analyzed_games,
     iter_player_moves,
@@ -30,6 +31,12 @@ async def get_error_patterns(
     db: AsyncSession,
     player_name: str,
 ) -> dict:
+    """Fetch the player's analyzed games and compute their error patterns."""
+    games = await get_player_analyzed_games(db, player_name)
+    return compute_error_patterns(games, player_name)
+
+
+def compute_error_patterns(games: list[Game], player_name: str) -> dict:
     """Frequency analysis of a player's mistakes, sliced by piece and move number.
 
     Considers only moves classified as ``"inaccuracy"``, ``"mistake"`` or
@@ -47,8 +54,6 @@ async def get_error_patterns(
 
     When the player has no recorded errors at all, both lists come back empty.
     """
-    games = await get_player_analyzed_games(db, player_name)
-
     piece_counts: Counter[str] = Counter()
     move_num_counts: Counter[int] = Counter()
 

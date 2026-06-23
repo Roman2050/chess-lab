@@ -18,13 +18,14 @@ from app.services.lichess import fetch_games_from_lichess
 from app.utils.parser import parse_pgn_text
 from app.services.db_manager import bulk_save_games
 from app.services.game_queries import get_filtered_games
-from app.services.aggregation.acpl import get_player_acpl
+from app.services.aggregation.helpers import get_player_analyzed_games
+from app.services.aggregation.acpl import compute_player_acpl
 from app.services.aggregation.accuracy import (
-    get_accuracy_by_phase,
+    compute_accuracy_by_phase,
     get_accuracy_by_move_number,
 )
 from app.services.aggregation.openings import get_opening_stats
-from app.services.aggregation.errors import get_error_patterns
+from app.services.aggregation.errors import compute_error_patterns
 from app.tasks.celery_app import analyze_game
 
 
@@ -165,13 +166,16 @@ async def get_player_stats(
 ):
     """
     Aggregated statistics for a single player: ACPL, accuracy by phase and
-    error patterns. The three independent aggregations are run concurrently.
+    error patterns. All three read the same analyzed-games set, so we fetch it
+    once and run the (pure, in-memory) aggregations on it — sharing a single
+    AsyncSession across concurrent tasks is unsafe and also re-queried the same
+    rows three times.
     """
-    acpl, accuracy_by_phase, errors = await asyncio.gather(
-        get_player_acpl(db, player_name, time_control),
-        get_accuracy_by_phase(db, player_name),
-        get_error_patterns(db, player_name),
-    )
+    games = await get_player_analyzed_games(db, player_name, time_control)
+
+    acpl = compute_player_acpl(games, player_name)
+    accuracy_by_phase = compute_accuracy_by_phase(games, player_name)
+    errors = compute_error_patterns(games, player_name)
 
     has_acpl = acpl["games_count"] > 0
     has_accuracy = any(phase["moves_count"] > 0 for phase in accuracy_by_phase.values())

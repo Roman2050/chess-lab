@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.db import Game
 from app.services.aggregation.helpers import (
     get_player_analyzed_games,
     iter_player_moves,
@@ -17,6 +18,12 @@ async def get_accuracy_by_phase(
     db: AsyncSession,
     player_name: str,
 ) -> dict:
+    """Fetch the player's analyzed games and compute per-phase accuracy."""
+    games = await get_player_analyzed_games(db, player_name)
+    return compute_accuracy_by_phase(games, player_name)
+
+
+def compute_accuracy_by_phase(games: list[Game], player_name: str) -> dict:
     """Aggregate accuracy metrics for a player, split by game phase.
 
     For each phase (opening / middlegame / endgame) we compute a flat
@@ -32,8 +39,6 @@ async def get_accuracy_by_phase(
     ``None`` and ``moves_count`` is ``0``. The shape stays stable so the
     frontend never has to defend against a missing key.
     """
-    games = await get_player_analyzed_games(db, player_name)
-
     phase_cp_losses: dict[str, list[int]] = {phase: [] for phase in _PHASES}
     phase_classifications: dict[str, list[str]] = {phase: [] for phase in _PHASES}
 
