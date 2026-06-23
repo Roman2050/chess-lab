@@ -200,15 +200,19 @@ Good and excellent moves store only: `ply`, `move_num`, `color`, `san`, `piece`,
 | `POST` | `/games/lichess/{username}` | Fetch games from Lichess API, parse, save |
 | `POST` | `/games/upload` | Upload a `.pgn` file, parse, save |
 | `GET` | `/games` | Paginated list with filters (player_name, winner, sort) |
-| `GET` | `/games/{id}` | Full game detail including pgn_content |
+| `GET` | `/games/{game_id}` | Full game detail including pgn_content |
+| `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
+| `GET` | `/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
+| `GET` | `/games/stats/{player_name}/openings` | Per-opening statistics for a player |
+| `GET` | `/games/stats/{player_name}/moves` | Accuracy metrics by move number for a player |
+| `POST` | `/analyze/player/{username}` | Enqueue batch analysis for all unanalyzed games of a player |
+| `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
 
 **Planned endpoints:**
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/games/{id}/analyze` | Enqueue Stockfish analysis for one game |
-| `POST` | `/analyze/player/{username}` | Enqueue batch analysis for all unanalyzed games |
 | `GET` | `/report/{username}` | Get or generate LLM report for a player |
 
 ---
