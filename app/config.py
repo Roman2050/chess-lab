@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     STOCKFISH_THREADS: int = Field(default=1, ge=1, le=128)
     STOCKFISH_HASH_MB: int = Field(default=128, ge=1, le=16384)
 
+    # LLM / report (Phase 5) — any OpenAI-compatible endpoint works; switch
+    # models by changing these. Defaults target a local Ollama instance.
+    LLM_BASE_URL: str = "http://localhost:11434/v1"
+    LLM_MODEL: str = "llama3.1"
+    LLM_API_KEY: str | None = None
+    LLM_TEMPERATURE: float = Field(default=0.4, ge=0.0, le=2.0)
+    LLM_TIMEOUT: int = Field(default=120, ge=1, le=600)
+    REPORT_LANGUAGE: str = "en"
+    REPORT_REFRESH_THRESHOLD: int = Field(default=20, ge=1)
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @computed_field
