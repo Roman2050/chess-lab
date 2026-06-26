@@ -1,4 +1,15 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, Date, Index
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Text,
+    Boolean,
+    Date,
+    DateTime,
+    Index,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
 
@@ -34,4 +45,34 @@ class Game(Base):
     __table_args__ = (
         Index('ix_games_white_winner', 'white_player', 'winner'),
         Index('ix_games_black_winner', 'black_player', 'winner'),
+    )
+
+
+class PlayerReport(Base):
+    __tablename__ = "player_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    player_name = Column(String, index=True, nullable=False)
+    language = Column(String, nullable=False, default="en", server_default="en")
+
+    # NULL while the first generation is still running
+    report_text = Column(Text, nullable=True)
+
+    # Snapshot: how many analyzed games fed into this report
+    analyzed_games_count = Column(Integer, nullable=False, default=0, server_default="0")
+
+    # Informational only — never used to decide whether to regenerate
+    last_game_played_at = Column(DateTime, nullable=True)
+
+    # ready | generating | failed
+    status = Column(String, nullable=False, default="ready", server_default="ready")
+
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint('player_name', 'language', name='uq_player_reports_player_lang'),
     )
