@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.db import Game
 
@@ -62,6 +63,72 @@ async def get_player_analyzed_games(
 
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+def get_player_games_sync(
+    db: Session,
+    player_name: str,
+    time_control: str | None = None,
+) -> list[Game]:
+    """Sync twin of :func:`get_player_games` for Celery tasks.
+
+    Celery runs on a sync DB session (`.cursorrules` / ARCHITECTURE.md), so the
+    async fetch above can't be reused there. Same query, same semantics — fetch
+    every game the player played, analyzed or not.
+    """
+    stmt = select(Game).where(
+        or_(
+            Game.white_player == player_name,
+            Game.black_player == player_name,
+        ),
+    )
+
+    if time_control is not None:
+        stmt = stmt.where(Game.time_control == time_control)
+
+    return list(db.execute(stmt).scalars().all())
+
+
+def get_player_analyzed_games_sync(
+    db: Session,
+    player_name: str,
+    time_control: str | None = None,
+) -> list[Game]:
+    """Sync twin of :func:`get_player_analyzed_games` for Celery tasks."""
+    stmt = select(Game).where(
+        or_(
+            Game.white_player == player_name,
+            Game.black_player == player_name,
+        ),
+        Game.is_analyzed.is_(True),
+    )
+
+    if time_control is not None:
+        stmt = stmt.where(Game.time_control == time_control)
+
+    return list(db.execute(stmt).scalars().all())
+
+
+def count_player_analyzed_games_sync(db: Session, player_name: str) -> int:
+    """Count the player's analyzed games without materializing them.
+
+    The LLM report stage only needs a gate ("do we have enough analyzed games
+    to bother?"), so a ``COUNT(*)`` is cheaper than pulling every row through
+    :func:`get_player_analyzed_games_sync`.
+    """
+    stmt = (
+        select(func.count())
+        .select_from(Game)
+        .where(
+            or_(
+                Game.white_player == player_name,
+                Game.black_player == player_name,
+            ),
+            Game.is_analyzed.is_(True),
+        )
+    )
+
+    return db.execute(stmt).scalar_one()
 
 
 def resolve_player_color(game: Game, player_name: str) -> str:
