@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -42,3 +42,42 @@ class ReportContext(BaseModel):
     openings: list[OpeningStat]
     errors: ErrorPatterns
     insights: ReportInsights
+
+
+class ReportRequestResponse(BaseModel):
+    """Response to ``POST /report/{username}`` — the decision outcome, not the text."""
+
+    player: str
+    language: str
+    action: str  # ReportAction value
+    message: str
+    current_analyzed_games_count: int
+    report_games_count: int | None  # snapshot of an existing report (None if absent)
+    games_until_next_report: int | None  # how many more analyzed games until refresh
+
+
+class ReportResponse(BaseModel):
+    """Response to ``GET /report/{username}`` — the cached report text + freshness."""
+
+    player: str
+    language: str
+    report_text: str
+    status: str
+    analyzed_games_count: int  # snapshot the report was generated on
+    current_analyzed_games_count: int
+    is_stale: bool  # delta >= threshold
+    created_at: datetime
+    updated_at: datetime
+    last_game_played_at: datetime | None
+
+
+class ReportStatusResponse(BaseModel):
+    """Response to ``GET /report/{username}/status`` — generation state only."""
+
+    player: str
+    language: str
+    status: str  # "none" | "generating" | "ready" | "failed"
+    has_report: bool
+    analyzed_games_count: int | None
+    current_analyzed_games_count: int
+    games_until_next_report: int | None
