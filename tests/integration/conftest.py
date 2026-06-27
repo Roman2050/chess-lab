@@ -94,7 +94,9 @@ async def async_session(async_db_url, migrated_db):
 
         # Ensure clean state between tests; otherwise UNIQUE constraints may fail
         # across reruns or multiple tests.
-        await session.execute(text("TRUNCATE TABLE games RESTART IDENTITY CASCADE"))
+        await session.execute(
+            text("TRUNCATE TABLE games, player_reports RESTART IDENTITY CASCADE")
+        )
         await session.commit()
         yield session
         await session.rollback()
