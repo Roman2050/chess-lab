@@ -1,6 +1,11 @@
 import pytest
 
-from app.services.analysis.classifier import build_analysis_data, classify_move
+from app.services.analysis.classifier import (
+    CP_LOSS_CAP,
+    _cp_loss_for_move,
+    build_analysis_data,
+    classify_move,
+)
 
 
 @pytest.mark.unit
@@ -41,6 +46,33 @@ def test_classify_best() -> None:
 )
 def test_classify_move_threshold_boundaries(cp_loss: int, expected: str) -> None:
     assert classify_move(cp_loss) == expected
+
+
+@pytest.mark.unit
+def test_cp_loss_capped_at_limit() -> None:
+    """Mate-bearing moves (eval ±10000) are clamped to CP_LOSS_CAP, not ~10050.
+
+    Without the upper clamp a single walk-into-mate move would dominate any
+    ACPL average and push a strong player's number past 1000.
+    """
+    # White blunders from +50 into a forced mate for Black (-10000).
+    assert _cp_loss_for_move("White", 50, -10000) == CP_LOSS_CAP
+    # Black blunders from -50 into a forced mate for White (+10000).
+    assert _cp_loss_for_move("Black", -50, 10000) == CP_LOSS_CAP
+
+
+@pytest.mark.unit
+def test_cp_loss_below_cap_unchanged() -> None:
+    """Ordinary losses below the cap pass through untouched."""
+    # White: 50 → -250 is a 300 cp loss, well under the cap.
+    assert _cp_loss_for_move("White", 50, -250) == 300
+
+
+@pytest.mark.unit
+def test_cp_loss_floor_still_zero() -> None:
+    """The lower clamp survives: an improving (negative) delta stays 0."""
+    # Black move where White-relative eval drops (good for Black) → no loss.
+    assert _cp_loss_for_move("Black", 30, -30) == 0
 
 
 @pytest.mark.unit

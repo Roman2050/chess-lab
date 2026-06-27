@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.db import Game
+from app.services.analysis.classifier import CP_LOSS_CAP
 
 
 async def get_player_games(
@@ -153,6 +154,13 @@ def iter_player_moves(game: Game, player_color: str) -> Iterator[dict]:
     payload missing the ``"moves"`` key — both yield nothing. Streaming as a
     generator avoids copying potentially long move lists when callers only
     aggregate (e.g. ACPL sums).
+
+    ``cp_loss`` is clamped to ``[0, CP_LOSS_CAP]`` on the way out. The source
+    cap in ``classifier._cp_loss_for_move`` only applies to *new* analyses;
+    games analysed before that fix still carry raw mate-inflated values (up to
+    ±10000) in their stored JSONB, which would push ACPL past 1000. Clamping
+    here sanitises old rows at read time without re-running Stockfish. A shallow
+    copy is yielded so the ORM-attached ``analysis_data`` dict is never mutated.
     """
     analysis = game.analysis_data
     if not analysis:
@@ -162,4 +170,9 @@ def iter_player_moves(game: Game, player_color: str) -> Iterator[dict]:
         return
     for move in moves:
         if move.get("color") == player_color:
-            yield move
+            raw_cp_loss = move.get("cp_loss", 0)
+            clamped = min(max(0, raw_cp_loss), CP_LOSS_CAP)
+            if clamped != raw_cp_loss:
+                yield {**move, "cp_loss": clamped}
+            else:
+                yield move
