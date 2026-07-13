@@ -12,6 +12,14 @@ _GOOD_MAX = 50
 _INACCURACY_MAX = 100
 _MISTAKE_MAX = 300
 
+# Upper bound on a single move's cp_loss. Mate scores are encoded as ±10000 cp
+# (engine.py `_MATE_CP`), so a move that walks into — or throws away — a forced
+# mate would otherwise contribute ~10000 to the average and blow ACPL past 1000,
+# making a strong player look terrible. Past ~10 pawns the position is already
+# decided and the exact magnitude carries no skill signal, so we clamp here.
+# This does NOT touch classification: everything over 300 is already "blunder".
+CP_LOSS_CAP = 1000
+
 _ERROR_CLASSES: frozenset[str] = frozenset({"inaccuracy", "mistake", "blunder"})
 
 # Heuristic for `summary.advantage_lost`: a side held a meaningful edge
@@ -61,12 +69,15 @@ def _cp_loss_for_move(color: str, eval_before: int, eval_after: int) -> int:
     move is bad when the score drops; a Black move is bad when it rises.
     Negative deltas (a move evaluated higher than the prior best line) are
     clamped to 0 — engine fluctuations should not produce "negative loss".
+
+    The result is also clamped from above to `CP_LOSS_CAP`: mate-bearing moves
+    (eval ±10000) would otherwise dominate any ACPL average. See `CP_LOSS_CAP`.
     """
     if color == "White":
         loss = eval_before - eval_after
     else:
         loss = eval_after - eval_before
-    return max(0, loss)
+    return min(max(0, loss), CP_LOSS_CAP)
 
 
 def _parse_best_move(value: object, board: chess.Board) -> chess.Move | None:

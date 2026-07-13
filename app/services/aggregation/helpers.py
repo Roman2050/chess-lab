@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.db import Game
+from app.services.analysis.classifier import CP_LOSS_CAP
 
 
 async def get_player_games(
@@ -64,6 +66,72 @@ async def get_player_analyzed_games(
     return list(result.scalars().all())
 
 
+def get_player_games_sync(
+    db: Session,
+    player_name: str,
+    time_control: str | None = None,
+) -> list[Game]:
+    """Sync twin of :func:`get_player_games` for Celery tasks.
+
+    Celery runs on a sync DB session (`.cursorrules` / ARCHITECTURE.md), so the
+    async fetch above can't be reused there. Same query, same semantics — fetch
+    every game the player played, analyzed or not.
+    """
+    stmt = select(Game).where(
+        or_(
+            Game.white_player == player_name,
+            Game.black_player == player_name,
+        ),
+    )
+
+    if time_control is not None:
+        stmt = stmt.where(Game.time_control == time_control)
+
+    return list(db.execute(stmt).scalars().all())
+
+
+def get_player_analyzed_games_sync(
+    db: Session,
+    player_name: str,
+    time_control: str | None = None,
+) -> list[Game]:
+    """Sync twin of :func:`get_player_analyzed_games` for Celery tasks."""
+    stmt = select(Game).where(
+        or_(
+            Game.white_player == player_name,
+            Game.black_player == player_name,
+        ),
+        Game.is_analyzed.is_(True),
+    )
+
+    if time_control is not None:
+        stmt = stmt.where(Game.time_control == time_control)
+
+    return list(db.execute(stmt).scalars().all())
+
+
+def count_player_analyzed_games_sync(db: Session, player_name: str) -> int:
+    """Count the player's analyzed games without materializing them.
+
+    The LLM report stage only needs a gate ("do we have enough analyzed games
+    to bother?"), so a ``COUNT(*)`` is cheaper than pulling every row through
+    :func:`get_player_analyzed_games_sync`.
+    """
+    stmt = (
+        select(func.count())
+        .select_from(Game)
+        .where(
+            or_(
+                Game.white_player == player_name,
+                Game.black_player == player_name,
+            ),
+            Game.is_analyzed.is_(True),
+        )
+    )
+
+    return db.execute(stmt).scalar_one()
+
+
 def resolve_player_color(game: Game, player_name: str) -> str:
     """Return ``"White"`` or ``"Black"`` for `player_name` in `game`.
 
@@ -86,6 +154,13 @@ def iter_player_moves(game: Game, player_color: str) -> Iterator[dict]:
     payload missing the ``"moves"`` key — both yield nothing. Streaming as a
     generator avoids copying potentially long move lists when callers only
     aggregate (e.g. ACPL sums).
+
+    ``cp_loss`` is clamped to ``[0, CP_LOSS_CAP]`` on the way out. The source
+    cap in ``classifier._cp_loss_for_move`` only applies to *new* analyses;
+    games analysed before that fix still carry raw mate-inflated values (up to
+    ±10000) in their stored JSONB, which would push ACPL past 1000. Clamping
+    here sanitises old rows at read time without re-running Stockfish. A shallow
+    copy is yielded so the ORM-attached ``analysis_data`` dict is never mutated.
     """
     analysis = game.analysis_data
     if not analysis:
@@ -95,4 +170,9 @@ def iter_player_moves(game: Game, player_color: str) -> Iterator[dict]:
         return
     for move in moves:
         if move.get("color") == player_color:
-            yield move
+            raw_cp_loss = move.get("cp_loss", 0)
+            clamped = min(max(0, raw_cp_loss), CP_LOSS_CAP)
+            if clamped != raw_cp_loss:
+                yield {**move, "cp_loss": clamped}
+            else:
+                yield move

@@ -197,6 +197,30 @@ async def test_acpl_by_phase_handles_missing_phase(monkeypatch, fake_games, db) 
 
 
 @pytest.mark.unit
+async def test_acpl_clamps_mate_inflated_moves(monkeypatch, fake_games, db) -> None:
+    """Legacy rows with raw mate cp_loss (10050) are clamped at read time.
+
+    A game analysed before the source cap can still carry a ~10000 cp_loss for
+    a walk-into-mate move. Without the read-time clamp in `iter_player_moves`
+    the per-game ACPL would explode past 1000; with it, that move counts as
+    CP_LOSS_CAP (1000) instead.
+
+        9 quiet moves at cp_loss=10 + 1 mate move at cp_loss=10050
+        clamped game ACPL = (9*10 + 1000) / 10 = 109.0
+    """
+    moves = _moves(9, cp_loss=10)
+    moves.append(
+        _make_move(ply=19, move_num=10, cp_loss=10050, classification="blunder")
+    )
+    games = fake_games({"moves": moves})
+    _patch_analyzed_games(monkeypatch, "acpl", games)
+
+    result = await get_player_acpl(db, PLAYER)
+
+    assert result["acpl"] == 109.0
+
+
+@pytest.mark.unit
 async def test_acpl_empty_player(monkeypatch, db) -> None:
     """No analyzed games: zero counts, every metric None, shape intact."""
     _patch_analyzed_games(monkeypatch, "acpl", [])

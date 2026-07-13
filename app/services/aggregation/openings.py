@@ -40,7 +40,21 @@ async def get_opening_stats(
     unrelated games into a meaningless aggregate row.
     """
     games = await get_player_games(db, player_name)
+    return compute_opening_stats(games, player_name, limit)
 
+
+def compute_opening_stats(
+    games: list[Game],
+    player_name: str,
+    limit: int = 10,
+) -> list[dict]:
+    """Pure aggregation core of :func:`get_opening_stats` (no DB access).
+
+    Split out so Celery's sync report stage can feed pre-fetched games in
+    without an async session — mirrors the ``compute_*`` / ``get_*`` divide in
+    ``acpl.py`` / ``errors.py``. See :func:`get_opening_stats` for the metric
+    rationale (all-games win-rate, analyzed-only ACPL, NULL openings dropped).
+    """
     buckets: dict[str, _OpeningBucket] = defaultdict(_OpeningBucket)
 
     for game in games:
