@@ -33,6 +33,7 @@ class MoveAccuracyStat(BaseModel):
     move_num: int
     games_count: int
     avg_cp_loss: float
+    avg_wp_loss: float | None  # win-probability loss per move, % (Phase 6)
     inaccuracy_rate: float
     mistake_rate: float
     blunder_rate: float
@@ -46,6 +47,7 @@ class OpeningStat(BaseModel):
     losses: int
     win_rate: float
     acpl_in_opening: float | None
+    wp_loss_in_opening: float | None  # win-probability loss in opening, % (Phase 6)
     analyzed_games_count: int
 
 

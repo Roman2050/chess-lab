@@ -11,6 +11,7 @@ from app.services.aggregation.helpers import (
     iter_player_moves,
     resolve_player_color,
 )
+from app.services.aggregation.winprob import move_wp_loss
 
 
 async def get_opening_stats(
@@ -26,13 +27,14 @@ async def get_opening_stats(
     silently disappear from the player's opening repertoire until the
     Stockfish queue catches up.
 
-    ``acpl_in_opening`` is the secondary signal: a flat per-move mean of
-    ``cp_loss`` over moves tagged ``phase == "opening"``, restricted to
+    The secondary signal is now twofold: ``acpl_in_opening`` (raw centipawn
+    loss) and ``wp_loss_in_opening`` (win-probability loss, §3.6) — each a
+    flat per-move mean over moves tagged ``phase == "opening"``, restricted to
     analyzed games. Mirrors :func:`get_accuracy_by_phase`'s "flat per-move
     mean" choice — many openings have few analyzed games, and a per-game
     average would collapse to noise on tiny denominators. Openings with zero
-    analyzed games report ``acpl_in_opening = None`` (not ``0``) so the
-    frontend can tell "not analyzed yet" apart from "analyzed and clean".
+    analyzed games report both as ``None`` (not ``0``) so the frontend can
+    tell "not analyzed yet" apart from "analyzed and clean".
 
     Games with ``opening_name`` NULL or empty are dropped: they're either
     pre-ECO-enrichment artifacts (see ARCHITECTURE.md §3.3) or malformed
@@ -73,6 +75,9 @@ def compute_opening_stats(
             for move in iter_player_moves(game, color):
                 if move.get("phase") == "opening":
                     bucket.opening_cp_losses.append(move["cp_loss"])
+                    wp = move_wp_loss(move)
+                    if wp is not None:
+                        bucket.opening_wp_losses.append(wp)
 
     rows = [_bucket_to_row(name, bucket) for name, bucket in buckets.items()]
     rows.sort(key=lambda row: row["games_count"], reverse=True)
@@ -96,6 +101,7 @@ class _OpeningBucket:
     losses: int = 0
     analyzed_games_count: int = 0
     opening_cp_losses: list[int] = field(default_factory=list)
+    opening_wp_losses: list[float] = field(default_factory=list)
 
 
 def _tally_outcome(bucket: _OpeningBucket, game: Game, player_color: str) -> None:
@@ -125,6 +131,13 @@ def _bucket_to_row(opening_name: str, bucket: _OpeningBucket) -> dict:
     else:
         acpl_in_opening = None
 
+    if bucket.opening_wp_losses:
+        wp_loss_in_opening: float | None = round(
+            sum(bucket.opening_wp_losses) / len(bucket.opening_wp_losses), 2
+        )
+    else:
+        wp_loss_in_opening = None
+
     return {
         "opening_name": opening_name,
         "games_count": bucket.games_count,
@@ -133,5 +146,6 @@ def _bucket_to_row(opening_name: str, bucket: _OpeningBucket) -> dict:
         "losses": bucket.losses,
         "win_rate": round(bucket.wins / bucket.games_count * 100, 1),
         "acpl_in_opening": acpl_in_opening,
+        "wp_loss_in_opening": wp_loss_in_opening,
         "analyzed_games_count": bucket.analyzed_games_count,
     }
