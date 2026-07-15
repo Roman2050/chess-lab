@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
-from app.schemas.stats import AcplStats, ErrorPatterns, OpeningStat, PhaseStats
+from app.schemas.stats import ErrorPatterns, OpeningStat, PhaseStats, WpLossStats
 
 
 class ReportInsights(BaseModel):
@@ -37,7 +37,7 @@ class ReportContext(BaseModel):
     analyzed_games_count: int
     total_games_count: int
     last_game_played_at: date | None
-    acpl: AcplStats
+    wp: WpLossStats
     accuracy_by_phase: dict[str, PhaseStats]  # opening / middlegame / endgame
     openings: list[OpeningStat]
     errors: ErrorPatterns
