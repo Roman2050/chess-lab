@@ -52,6 +52,19 @@ position for training without storing megabytes of redundant data.
 - `get_async_db()` — FastAPI route dependency (asyncpg)
 - `get_sync_db_session()` — context manager for Celery workers (psycopg2)
 
+**3.6 Win-Probability (WP) Metric [PLANNED Phase 6]**
+Centipawn loss is linear in centipawns, but the centipawns→result relationship is
+not: a 60cp slip near equality costs far more than one at +900, and the opening
+(book-like, near-equal positions) always shows the lowest raw `cp_loss` for anyone,
+so ranking phases by ACPL trivially crowns the opening. To fix both, move quality in
+the **report** is expressed as **win-probability loss** — the drop in the mover's
+winning chances, via a logistic map `WP(cp) = 100 / (1 + exp(-WP_SCALE * cp))`. This
+is a **read-side derived metric**: it is computed from the `eval_before` / `eval_after`
+already stored for every move (§5.3), so there is **no DB change, no migration, no
+re-analysis**. The `cp_loss` classification thresholds, `MultiPV`, and `analysis_data`
+schema are untouched; ACPL remains for the public `/stats` endpoints. See
+`Phase_6-WinProbabilityMetric.md`.
+
 ---
 
 ## 4. Project File Structure
@@ -68,7 +81,8 @@ chess-lab/
 │   ├── schemas/
 │   │   ├── games.py           # Pydantic: GameSummary, GameDetail, PaginatedGames,
 │   │   │                      #           UploadResponse, SortOrder
-│   │   ├── stats.py           # PlayerStats, AcplStats, PhaseStats, OpeningStat, ...
+│   │   ├── stats.py           # PlayerStats, AcplStats, PhaseStats, OpeningStat,
+│   │   │                      #   MoveAccuracyStat, WpLossStats [Phase 6], ...
 │   │   ├── analysis.py        # BatchAnalysisResponse, AnalysisProgress
 │   │   └── report.py          # [PLANNED Phase 5] ReportContext, ReportInsights,
 │   │                          #           Report{Request,Status}Response, ReportResponse
@@ -89,8 +103,9 @@ chess-lab/
 │   │   ├── aggregation/       # Per-player stat aggregations (Phase 4)
 │   │   │   ├── helpers.py     # game fetch (async + sync) + move/color iterators
 │   │   │   ├── acpl.py        # compute_player_acpl() weighted ACPL breakdown
-│   │   │   ├── accuracy.py    # accuracy by phase / by move number
-│   │   │   ├── openings.py    # compute_opening_stats() win-rate + opening ACPL
+│   │   │   ├── winprob.py     # [PLANNED Phase 6] win_prob/move_wp_loss + compute_player_wp_loss()
+│   │   │   ├── accuracy.py    # accuracy by phase / by move number (+ avg_wp_loss, Phase 6)
+│   │   │   ├── openings.py    # compute_opening_stats() win-rate + opening ACPL/WP
 │   │   │   └── errors.py      # compute_error_patterns() by piece / move number
 │   │   ├── eco.py             # [PLANNED] ECO opening dictionary lookup
 │   │   ├── llm/               # [PLANNED Phase 5] LLM provider abstraction
@@ -217,6 +232,10 @@ populated **only** when `classification` is `"inaccuracy"`, `"mistake"`, or `"bl
 Good and excellent moves store only: `ply`, `move_num`, `color`, `san`, `piece`,
 `eval_before`, `eval_after`, `cp_loss`, `classification`.
 
+**Note (Phase 6):** `eval_before` / `eval_after` are stored on **every** move (both
+White-relative centipawns), so the win-probability loss metric (§3.6) is derived
+read-side from them — no extra fields and no schema change are required.
+
 **Classification thresholds (cp_loss):**
 
 | cp_loss | classification |
@@ -240,8 +259,8 @@ Good and excellent moves store only: `ply`, `move_num`, `color`, `san`, `piece`,
 | `GET` | `/games/{game_id}` | Full game detail including pgn_content |
 | `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
 | `GET` | `/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
-| `GET` | `/games/stats/{player_name}/openings` | Per-opening statistics for a player |
-| `GET` | `/games/stats/{player_name}/moves` | Accuracy metrics by move number for a player |
+| `GET` | `/games/stats/{player_name}/openings` | Per-opening statistics for a player (win-rate + ACPL; `wp_loss_in_opening` added in Phase 6) |
+| `GET` | `/games/stats/{player_name}/moves` | Accuracy metrics by move number (`avg_cp_loss`; `avg_wp_loss` added in Phase 6) |
 | `POST` | `/analyze/player/{username}` | Enqueue batch analysis for all unanalyzed games of a player |
 | `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
@@ -303,6 +322,8 @@ POST /report/{username}?language=en
                                        ↓
        build_report_context(): compute_player_acpl / accuracy / errors /
               opening_stats  +  derive_insights()   → ReportContext
+              (Phase 6: report uses compute_player_wp_loss instead of ACPL —
+               win-probability loss for overall / color / phase / opening)
                                        ↓
               build_messages() → (system, user) digest
                                        ↓
@@ -365,6 +386,17 @@ the result is cached in `PlayerReport` and exposed via `POST` / `GET` /
 `GET .../status`. Reports are regenerated only when the player's analyzed-game count
 has grown by `REPORT_REFRESH_THRESHOLD` since the last snapshot (Section 7.1).
 See `Phase_5-LLMIntegration.md` for the per-chat implementation plan.
+
+**Phase 6 — Win-Probability Report Metric**
+Replace raw ACPL with **win-probability loss** inside the report (Section 3.6): a
+logistic map of the stored per-move evals into "winning chances lost per move",
+applied to overall / color / phase / opening signals and the derived `insights`.
+This removes the linear-centipawn bias (notably the "opening always looks strongest"
+artifact) and yields a metric both humans and the LLM read intuitively. The public
+`/stats` endpoints stay on ACPL; `/stats/.../moves` gains `avg_wp_loss` alongside
+`avg_cp_loss`. It is a **read-side derived metric** over existing `eval_before` /
+`eval_after` — no DB change, no migration, no re-analysis.
+See `Phase_6-WinProbabilityMetric.md` for the per-chat implementation plan.
 
 ---
 
