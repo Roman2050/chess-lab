@@ -20,6 +20,15 @@ class AcplStats(BaseModel):
     acpl_by_phase: dict[str, float | None]  # {"opening": ..., ...}
 
 
+class WpLossStats(BaseModel):
+    player: str
+    games_count: int
+    total_moves_analyzed: int
+    wp_loss: float | None  # середня втрата шансів на хід, %
+    wp_loss_by_color: dict[str, float | None]  # {"white": ..., "black": ...}
+    wp_loss_by_phase: dict[str, float | None]  # {"opening": ..., ...}
+
+
 class MoveAccuracyStat(BaseModel):
     move_num: int
     games_count: int
