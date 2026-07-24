@@ -318,6 +318,74 @@ async def test_accuracy_by_move_number_no_phase_field(
 
 
 @pytest.mark.unit
+async def test_accuracy_by_move_number_includes_wp_loss(
+    monkeypatch, fake_games, db
+) -> None:
+    """Moves carrying evals produce an avg_wp_loss (float, >= 0) without
+    dropping the pre-existing avg_cp_loss field (contract stays additive)."""
+    games = fake_games(
+        {
+            "moves": [
+                {
+                    **_make_move(ply=1, move_num=1, cp_loss=60),
+                    "eval_before": 100,
+                    "eval_after": -100,
+                },
+            ]
+        }
+    )
+    _patch_analyzed_games(monkeypatch, "accuracy", games)
+
+    rows = await get_accuracy_by_move_number(db, PLAYER, min_games=1)
+
+    assert rows
+    row = rows[0]
+    assert "avg_cp_loss" in row
+    assert isinstance(row["avg_wp_loss"], float)
+    assert row["avg_wp_loss"] >= 0
+
+
+@pytest.mark.unit
+async def test_accuracy_by_move_number_excludes_decided_position_wp(
+    monkeypatch, fake_games, db
+) -> None:
+    """A decided-position move keeps the row but contributes no WP value."""
+    games = fake_games(
+        {
+            "moves": [
+                {
+                    **_make_move(ply=1, move_num=1, cp_loss=60),
+                    "eval_before": 1_000,
+                    "eval_after": 900,
+                },
+            ]
+        }
+    )
+    _patch_analyzed_games(monkeypatch, "accuracy", games)
+
+    rows = await get_accuracy_by_move_number(db, PLAYER, min_games=1)
+
+    assert rows[0]["avg_cp_loss"] == 60.0
+    assert rows[0]["avg_wp_loss"] is None
+
+
+@pytest.mark.unit
+async def test_accuracy_by_move_number_wp_none_without_evals(
+    monkeypatch, fake_games, db
+) -> None:
+    """Moves lacking evals → avg_wp_loss is None, but the row is still emitted
+    (avg_cp_loss keeps the row alive)."""
+    games = fake_games({"moves": [_make_move(ply=1, move_num=1, cp_loss=60)]})
+    _patch_analyzed_games(monkeypatch, "accuracy", games)
+
+    rows = await get_accuracy_by_move_number(db, PLAYER, min_games=1)
+
+    assert rows
+    assert rows[0]["avg_wp_loss"] is None
+    assert "avg_cp_loss" in rows[0]
+
+
+@pytest.mark.unit
 async def test_accuracy_by_move_number_sorted(monkeypatch, fake_games, db) -> None:
     """Rows come back sorted by move_num ASC regardless of input order."""
     games = fake_games(

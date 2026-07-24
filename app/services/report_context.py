@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.schemas.report import ReportContext, ReportInsights
-from app.services.aggregation.acpl import compute_player_acpl
 from app.services.aggregation.accuracy import compute_accuracy_by_phase
 from app.services.aggregation.errors import compute_error_patterns
 from app.services.aggregation.helpers import (
@@ -11,16 +10,25 @@ from app.services.aggregation.helpers import (
     get_player_games_sync,
 )
 from app.services.aggregation.openings import compute_opening_stats
+from app.services.aggregation.winprob import compute_player_wp_loss
 
-# Overall-skill buckets keyed off mean ACPL. A narrative hint for the report,
-# NOT the official per-move cp_loss classification (see .cursorrules).
-_SKILL_STRONG_MAX = 20.0
-_SKILL_SOLID_MAX = 40.0
-_SKILL_INCONSISTENT_MAX = 70.0
+# Overall-skill buckets keyed off mean win-probability loss (% of winning
+# chances lost per move). A narrative hint for the report, NOT the official
+# per-move cp_loss classification (see .cursorrules).
+# Interim calibration from the real-player sample in sandbox.ipynb (Phase 6
+# Chat 5). Revisit when the calibration dataset grows.
+_WP_SKILL_STRONG_MAX = 2.5
+_WP_SKILL_SOLID_MAX = 4.0
+_WP_SKILL_INCONSISTENT_MAX = 6.0
 
-# white vs black ACPL must differ by at least this (centipawns) before we call
-# one color a genuine weakness rather than normal noise.
-COLOR_BIAS_THRESHOLD = 8.0
+# white vs black WP-loss must differ by at least this (percentage points)
+# before we call one color a genuine weakness rather than normal noise.
+COLOR_BIAS_THRESHOLD = 1.0
+
+# A phase is only crowned strongest if it leads the next-best phase by at least
+# this WP-loss margin (percentage points) — otherwise strongest_phase is None.
+# Guards against declaring a phase a strength on noise.
+PHASE_WP_BIAS_THRESHOLD = 1.0
 
 # A piece is only flagged as the dominant error source if it accounts for at
 # least this share of all the player's errors.
@@ -51,7 +59,7 @@ def build_report_context(
     games_all = get_player_games_sync(db, player_name)
     games_analyzed = get_player_analyzed_games_sync(db, player_name)
 
-    acpl = compute_player_acpl(games_analyzed, player_name)
+    wp = compute_player_wp_loss(games_analyzed, player_name)
     accuracy = compute_accuracy_by_phase(games_analyzed, player_name)
     errors = compute_error_patterns(games_analyzed, player_name)
     openings = compute_opening_stats(
@@ -61,7 +69,7 @@ def build_report_context(
     played_dates = [g.date_played for g in games_all if g.date_played]
     last_game_played_at = max(played_dates) if played_dates else None
 
-    insights = derive_insights(acpl, accuracy, errors, openings)
+    insights = derive_insights(wp, accuracy, errors, openings)
 
     # Pydantic coerces the plain aggregation dicts into their nested models on
     # construction, so this doubles as validation of the aggregation output.
@@ -71,7 +79,7 @@ def build_report_context(
         analyzed_games_count=len(games_analyzed),
         total_games_count=len(games_all),
         last_game_played_at=last_game_played_at,
-        acpl=acpl,
+        wp=wp,
         accuracy_by_phase=accuracy,
         openings=openings,
         errors=errors,
@@ -80,7 +88,7 @@ def build_report_context(
 
 
 def derive_insights(
-    acpl: dict,
+    wp: dict,
     accuracy: dict[str, dict],
     errors: dict,
     openings: list[dict],
@@ -89,12 +97,15 @@ def derive_insights(
 
     Pure function: all the "smart" report logic lives here, never in the LLM.
     Every threshold is a module-level constant rather than a magic number.
+    Move quality is expressed as win-probability loss (Phase 6); ``accuracy`` is
+    kept for callers/parity but phase strength is now derived from ``wp``.
     """
+    wp_by_phase = wp.get("wp_loss_by_phase", {})
     return ReportInsights(
-        overall_skill=_overall_skill(acpl.get("acpl")),
-        weakest_phase=_extreme_phase(accuracy, weakest=True),
-        strongest_phase=_extreme_phase(accuracy, weakest=False),
-        weaker_color=_weaker_color(acpl.get("acpl_by_color", {})),
+        overall_skill=_overall_skill(wp.get("wp_loss")),
+        weakest_phase=_extreme_phase(wp_by_phase, weakest=True),
+        strongest_phase=_strongest_phase(wp_by_phase),
+        weaker_color=_weaker_color(wp.get("wp_loss_by_color", {})),
         dominant_error_piece=_dominant_error_piece(errors),
         error_hotspot_moves=_error_hotspot_moves(errors),
         best_openings=_ranked_openings(openings, best=True),
@@ -102,29 +113,27 @@ def derive_insights(
     )
 
 
-def _overall_skill(acpl: float | None) -> str:
-    """Bucket mean ACPL into a coarse skill label; ``None`` → ``"inconsistent"``."""
-    if acpl is None:
+def _overall_skill(wp_loss: float | None) -> str:
+    """Bucket mean WP-loss into a coarse skill label; ``None`` → ``"inconsistent"``."""
+    if wp_loss is None:
         return "inconsistent"
-    if acpl <= _SKILL_STRONG_MAX:
+    if wp_loss <= _WP_SKILL_STRONG_MAX:
         return "strong"
-    if acpl <= _SKILL_SOLID_MAX:
+    if wp_loss <= _WP_SKILL_SOLID_MAX:
         return "solid"
-    if acpl <= _SKILL_INCONSISTENT_MAX:
+    if wp_loss <= _WP_SKILL_INCONSISTENT_MAX:
         return "inconsistent"
     return "weak"
 
 
-def _extreme_phase(accuracy: dict[str, dict], *, weakest: bool) -> str | None:
-    """Phase with the highest (weakest) or lowest (strongest) ACPL.
+def _extreme_phase(phase_values: dict[str, float | None], *, weakest: bool) -> str | None:
+    """Phase with the highest (weakest) or lowest (strongest) WP-loss.
 
-    Only phases the player actually reached (``moves_count > 0`` and a non-None
-    ACPL) are considered; if none qualify, returns ``None``.
+    Accepts a ``phase -> value`` mapping; only phases with a non-None value are
+    considered. Returns ``None`` when no phase qualifies.
     """
     candidates = [
-        (phase, stats["acpl"])
-        for phase, stats in accuracy.items()
-        if stats.get("moves_count", 0) > 0 and stats.get("acpl") is not None
+        (phase, value) for phase, value in phase_values.items() if value is not None
     ]
     if not candidates:
         return None
@@ -132,10 +141,26 @@ def _extreme_phase(accuracy: dict[str, dict], *, weakest: bool) -> str | None:
     return chooser(candidates, key=lambda item: item[1])[0]
 
 
-def _weaker_color(acpl_by_color: dict[str, float | None]) -> str | None:
-    """Color whose ACPL is meaningfully worse, or ``None`` if too close / missing."""
-    white = acpl_by_color.get("white")
-    black = acpl_by_color.get("black")
+def _strongest_phase(phase_values: dict[str, float | None]) -> str | None:
+    """Lowest-WP-loss phase, but only if it clears the significance margin.
+
+    Guards against the "opening always looks strongest" artifact: the best phase
+    must lead the next-best by at least :data:`PHASE_WP_BIAS_THRESHOLD`,
+    otherwise the phases are too close to call and we return ``None``.
+    """
+    best = _extreme_phase(phase_values, weakest=False)
+    if best is None:
+        return None
+    values = sorted(v for v in phase_values.values() if v is not None)
+    if len(values) >= 2 and (values[1] - values[0]) < PHASE_WP_BIAS_THRESHOLD:
+        return None
+    return best
+
+
+def _weaker_color(wp_loss_by_color: dict[str, float | None]) -> str | None:
+    """Color whose WP-loss is meaningfully worse, or ``None`` if too close / missing."""
+    white = wp_loss_by_color.get("white")
+    black = wp_loss_by_color.get("black")
     if white is None or black is None:
         return None
     if abs(white - black) < COLOR_BIAS_THRESHOLD:

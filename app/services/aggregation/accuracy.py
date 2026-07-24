@@ -10,6 +10,7 @@ from app.services.aggregation.helpers import (
     iter_player_moves,
     resolve_player_color,
 )
+from app.services.aggregation.winprob import move_wp_loss
 
 _PHASES: tuple[str, ...] = ("opening", "middlegame", "endgame")
 
@@ -64,6 +65,12 @@ async def get_accuracy_by_move_number(
 ) -> list[dict]:
     """Aggregate accuracy metrics for a player, split by move number.
 
+    Each row carries both ``avg_cp_loss`` (raw centipawn loss) and
+    ``avg_wp_loss`` (win-probability loss, §3.6): the latter is a flat
+    per-move mean of :func:`move_wp_loss` over moves at that move number that
+    carry engine evals and start inside the calibrated live-position window,
+    or ``None`` when none do (keeps the row shape stable).
+
     Returns one row per ``move_num``, sorted ascending. ``games_count`` is
     the number of **distinct games** the player reached that move in —
     in practice this equals the move list length (a player has at most
@@ -88,6 +95,7 @@ async def get_accuracy_by_move_number(
     games = await get_player_analyzed_games(db, player_name)
 
     per_move_cp_losses: dict[int, list[int]] = defaultdict(list)
+    per_move_wp_losses: dict[int, list[float]] = defaultdict(list)
     per_move_classifications: dict[int, list[str]] = defaultdict(list)
     per_move_game_ids: dict[int, set[int]] = defaultdict(set)
 
@@ -98,6 +106,9 @@ async def get_accuracy_by_move_number(
             if move_num is None:
                 continue
             per_move_cp_losses[move_num].append(move["cp_loss"])
+            wp = move_wp_loss(move)
+            if wp is not None:
+                per_move_wp_losses[move_num].append(wp)
             per_move_classifications[move_num].append(move.get("classification", ""))
             per_move_game_ids[move_num].add(game.id)
 
@@ -108,6 +119,7 @@ async def get_accuracy_by_move_number(
             continue
 
         cp_losses = per_move_cp_losses[move_num]
+        wp_losses = per_move_wp_losses[move_num]
         classifications = per_move_classifications[move_num]
         n = len(cp_losses)
 
@@ -115,6 +127,9 @@ async def get_accuracy_by_move_number(
             "move_num": move_num,
             "games_count": games_count,
             "avg_cp_loss": round(sum(cp_losses) / n, 1),
+            "avg_wp_loss": (
+                round(sum(wp_losses) / len(wp_losses), 2) if wp_losses else None
+            ),
         }
         row.update(_error_rates(classifications, n))
         rows.append(row)

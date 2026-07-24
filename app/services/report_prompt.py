@@ -56,7 +56,7 @@ def render_context_to_prompt(ctx: ReportContext) -> str:
     """
     sections = [
         _render_player(ctx),
-        _render_overall_acpl(ctx),
+        _render_overall_wp(ctx),
         _render_by_phase(ctx),
         _render_error_profile(ctx),
         _render_openings(ctx),
@@ -86,34 +86,36 @@ def _render_player(ctx: ReportContext) -> str:
     )
 
 
-def _render_overall_acpl(ctx: ReportContext) -> str:
-    acpl = ctx.acpl
-    overall = _fmt(acpl.acpl) if acpl.acpl is not None else _NOT_ENOUGH
-    white = acpl.acpl_by_color.get("white")
-    black = acpl.acpl_by_color.get("black")
+def _render_overall_wp(ctx: ReportContext) -> str:
+    wp = ctx.wp
+    overall = _fmt(wp.wp_loss) if wp.wp_loss is not None else _NOT_ENOUGH
+    white = wp.wp_loss_by_color.get("white")
+    black = wp.wp_loss_by_color.get("black")
     return (
-        "OVERALL ACPL\n"
+        "OVERALL WIN-PROBABILITY LOSS\n"
         f"overall: {overall} "
-        "(average centipawns lost per move; lower is better — "
-        "~<20 strong, 20-40 solid, 40-70 inconsistent, >70 weak)\n"
+        "(average win probability lost per move, in percentage points; "
+        "lower is better — <=2.5 strong, >2.5-4 solid, "
+        ">4-6 inconsistent, >6 weak)\n"
         f"as white: {_fmt(white) if white is not None else _NO_DATA}\n"
         f"as black: {_fmt(black) if black is not None else _NO_DATA}"
     )
 
 
 def _render_by_phase(ctx: ReportContext) -> str:
-    lines = ["BY PHASE (acpl + error rates + moves analyzed)"]
+    lines = ["BY PHASE (win-prob loss + error rates + moves analyzed)"]
     for phase in _PHASE_ORDER:
+        wp = ctx.wp.wp_loss_by_phase.get(phase)
         stats = ctx.accuracy_by_phase.get(phase)
-        lines.append(f"{phase}: {_phase_line(stats)}")
+        lines.append(f"{phase}: {_phase_line(wp, stats)}")
     return "\n".join(lines)
 
 
-def _phase_line(stats: PhaseStats | None) -> str:
-    if stats is None or stats.moves_count == 0 or stats.acpl is None:
+def _phase_line(wp: float | None, stats: PhaseStats | None) -> str:
+    if stats is None or stats.moves_count == 0 or wp is None:
         return f"{_NO_DATA} (player did not reach this phase in analyzed games)"
     return (
-        f"acpl {_fmt(stats.acpl)}; "
+        f"wp loss {_fmt(wp)}; "
         f"inaccuracies {_fmt(stats.inaccuracy_rate)}%, "
         f"mistakes {_fmt(stats.mistake_rate)}%, "
         f"blunders {_fmt(stats.blunder_rate)}%; "
@@ -157,14 +159,14 @@ def _render_openings(ctx: ReportContext) -> str:
 
 
 def _opening_line(opening: OpeningStat) -> str:
-    acpl = (
-        _fmt(opening.acpl_in_opening)
-        if opening.acpl_in_opening is not None
+    wp = (
+        _fmt(opening.wp_loss_in_opening)
+        if opening.wp_loss_in_opening is not None
         else _NO_DATA
     )
     return (
         f"{opening.opening_name}: {opening.games_count} games, "
-        f"win rate {_fmt(opening.win_rate)}%, acpl in opening {acpl}"
+        f"win rate {_fmt(opening.win_rate)}%, wp loss in opening {wp}"
     )
 
 

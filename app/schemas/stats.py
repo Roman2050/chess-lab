@@ -20,10 +20,20 @@ class AcplStats(BaseModel):
     acpl_by_phase: dict[str, float | None]  # {"opening": ..., ...}
 
 
+class WpLossStats(BaseModel):
+    player: str
+    games_count: int
+    total_moves_analyzed: int
+    wp_loss: float | None  # середня втрата шансів на хід, %
+    wp_loss_by_color: dict[str, float | None]  # {"white": ..., "black": ...}
+    wp_loss_by_phase: dict[str, float | None]  # {"opening": ..., ...}
+
+
 class MoveAccuracyStat(BaseModel):
     move_num: int
     games_count: int
     avg_cp_loss: float
+    avg_wp_loss: float | None  # win-probability loss per move, % (Phase 6)
     inaccuracy_rate: float
     mistake_rate: float
     blunder_rate: float
@@ -37,6 +47,7 @@ class OpeningStat(BaseModel):
     losses: int
     win_rate: float
     acpl_in_opening: float | None
+    wp_loss_in_opening: float | None  # win-probability loss in opening, % (Phase 6)
     analyzed_games_count: int
 
 
