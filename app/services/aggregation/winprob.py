@@ -14,6 +14,12 @@ _PHASES: tuple[str, ...] = ("opening", "middlegame", "endgame")
 # виграшні шанси. Винесена константою; калібрується у Phase 6 Чат 5.
 WP_SCALE = 0.00368208
 
+# Каліброване на реальних даних вікно «живої» позиції. Ходи, де шанси
+# сторони, що ходить, уже <= 20% або >= 90%, не входять у WP-середні:
+# насичена сигмоїда інакше розбавляє метрику майже нульовими втратами.
+LIVE_WP_MIN = 20.0
+LIVE_WP_MAX = 90.0
+
 
 def win_prob(cp_mover: float) -> float:
     """Виграшні шанси сторони, що ходить (0..100 %), з її переваги в cp."""
@@ -21,18 +27,22 @@ def win_prob(cp_mover: float) -> float:
 
 
 def move_wp_loss(move: dict) -> float | None:
-    """Втрачені % виграшних шансів за один хід (>= 0), або None якщо оцінок нема.
+    """Втрачені % шансів у живій позиції, або ``None`` якщо хід не враховується.
 
     eval_before / eval_after — White-relative (див. engine.py/classifier.py),
-    тож для чорних інвертуємо знак. Читаємо СИРІ eval (не кламповані):
-    сигмоїда сама насичує мат-оцінки, cap не потрібен.
+    тож для чорних інвертуємо знак. Ходи без оцінок і ходи поза каліброваним
+    вікном ``LIVE_WP_MIN < WP_before < LIVE_WP_MAX`` пропускаються. Читаємо
+    СИРІ eval (не кламповані); cap не потрібен.
     """
     eb = move.get("eval_before")
     ea = move.get("eval_after")
     if eb is None or ea is None:
         return None
     sign = 1 if move.get("color") == "White" else -1
-    return max(0.0, win_prob(sign * eb) - win_prob(sign * ea))
+    wp_before = win_prob(sign * eb)
+    if not LIVE_WP_MIN < wp_before < LIVE_WP_MAX:
+        return None
+    return max(0.0, wp_before - win_prob(sign * ea))
 
 
 def compute_player_wp_loss(games: list[Game], player_name: str) -> dict:
@@ -42,7 +52,8 @@ def compute_player_wp_loss(games: list[Game], player_name: str) -> dict:
       mean(wp_loss) по ходах гравця), як у compute_player_acpl.
     - by_phase — плоске середнє wp_loss по всіх ходах фази.
     - Порожні зрізи → None (не 0).
-    Ходи без eval_before/eval_after (move_wp_loss -> None) пропускаються.
+    Ходи без eval_before/eval_after та ходи у вирішених позиціях
+    (move_wp_loss -> None) пропускаються.
     Партія без жодного придатного ходу не потрапляє у per-game середні.
     """
     if not games:

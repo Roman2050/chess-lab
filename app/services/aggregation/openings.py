@@ -30,11 +30,12 @@ async def get_opening_stats(
     The secondary signal is now twofold: ``acpl_in_opening`` (raw centipawn
     loss) and ``wp_loss_in_opening`` (win-probability loss, §3.6) — each a
     flat per-move mean over moves tagged ``phase == "opening"``, restricted to
-    analyzed games. Mirrors :func:`get_accuracy_by_phase`'s "flat per-move
-    mean" choice — many openings have few analyzed games, and a per-game
-    average would collapse to noise on tiny denominators. Openings with zero
-    analyzed games report both as ``None`` (not ``0``) so the frontend can
-    tell "not analyzed yet" apart from "analyzed and clean".
+    analyzed games; WP additionally excludes positions outside the calibrated
+    live-position window. Mirrors :func:`get_accuracy_by_phase`'s "flat
+    per-move mean" choice — many openings have few analyzed games, and a
+    per-game average would collapse to noise on tiny denominators. Openings
+    without eligible values report the corresponding metric as ``None`` (not
+    ``0``), so the frontend can distinguish missing data from perfect play.
 
     Games with ``opening_name`` NULL or empty are dropped: they're either
     pre-ECO-enrichment artifacts (see ARCHITECTURE.md §3.3) or malformed

@@ -93,12 +93,12 @@ def _opening(name: str, games_count: int, win_rate: float) -> dict:
     [
         (None, "inconsistent"),
         (0.0, "strong"),
-        (2.0, "strong"),
-        (2.1, "solid"),
+        (2.5, "strong"),
+        (2.6, "solid"),
         (4.0, "solid"),
         (4.1, "inconsistent"),
-        (7.0, "inconsistent"),
-        (7.1, "weak"),
+        (6.0, "inconsistent"),
+        (6.1, "weak"),
         (15.0, "weak"),
     ],
 )

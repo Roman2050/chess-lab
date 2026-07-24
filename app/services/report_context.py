@@ -15,10 +15,11 @@ from app.services.aggregation.winprob import compute_player_wp_loss
 # Overall-skill buckets keyed off mean win-probability loss (% of winning
 # chances lost per move). A narrative hint for the report, NOT the official
 # per-move cp_loss classification (see .cursorrules).
-# PROVISIONAL — calibrated on real data in Phase 6 Chat 5.
-_WP_SKILL_STRONG_MAX = 2.0
+# Interim calibration from the real-player sample in sandbox.ipynb (Phase 6
+# Chat 5). Revisit when the calibration dataset grows.
+_WP_SKILL_STRONG_MAX = 2.5
 _WP_SKILL_SOLID_MAX = 4.0
-_WP_SKILL_INCONSISTENT_MAX = 7.0
+_WP_SKILL_INCONSISTENT_MAX = 6.0
 
 # white vs black WP-loss must differ by at least this (percentage points)
 # before we call one color a genuine weakness rather than normal noise.

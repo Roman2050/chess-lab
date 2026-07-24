@@ -346,6 +346,30 @@ async def test_accuracy_by_move_number_includes_wp_loss(
 
 
 @pytest.mark.unit
+async def test_accuracy_by_move_number_excludes_decided_position_wp(
+    monkeypatch, fake_games, db
+) -> None:
+    """A decided-position move keeps the row but contributes no WP value."""
+    games = fake_games(
+        {
+            "moves": [
+                {
+                    **_make_move(ply=1, move_num=1, cp_loss=60),
+                    "eval_before": 1_000,
+                    "eval_after": 900,
+                },
+            ]
+        }
+    )
+    _patch_analyzed_games(monkeypatch, "accuracy", games)
+
+    rows = await get_accuracy_by_move_number(db, PLAYER, min_games=1)
+
+    assert rows[0]["avg_cp_loss"] == 60.0
+    assert rows[0]["avg_wp_loss"] is None
+
+
+@pytest.mark.unit
 async def test_accuracy_by_move_number_wp_none_without_evals(
     monkeypatch, fake_games, db
 ) -> None:

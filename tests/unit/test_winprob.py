@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.aggregation.winprob import (
+    LIVE_WP_MAX,
+    LIVE_WP_MIN,
     compute_player_wp_loss,
     move_wp_loss,
     win_prob,
@@ -96,12 +98,25 @@ def test_move_wp_loss_improving_move_is_zero() -> None:
 
 @pytest.mark.unit
 def test_move_wp_loss_mate_saturates() -> None:
-    """Сигмоїда насичує мат — wp_loss не «вибухає»."""
+    """Мат із живої позиції має скінченну WP-втрату."""
     walk_into_mate = _make_move(color="White", eval_before=0, eval_after=-10_000)
     assert move_wp_loss(walk_into_mate) == pytest.approx(50.0, abs=1.0)
 
+
+@pytest.mark.unit
+def test_move_wp_loss_skips_decided_positions() -> None:
+    """Ходи поза каліброваним живим WP-вікном не розбавляють середні."""
+    assert (LIVE_WP_MIN, LIVE_WP_MAX) == (20.0, 90.0)
+
+    already_lost = _make_move(color="White", eval_before=-500, eval_after=-600)
     already_won = _make_move(color="White", eval_before=9_000, eval_after=10_000)
-    assert move_wp_loss(already_won) == pytest.approx(0.0, abs=1.0)
+    already_lost_as_black = _make_move(
+        color="Black", eval_before=500, eval_after=600
+    )
+
+    assert move_wp_loss(already_lost) is None
+    assert move_wp_loss(already_won) is None
+    assert move_wp_loss(already_lost_as_black) is None
 
 
 @pytest.mark.unit
@@ -197,6 +212,25 @@ def test_compute_player_wp_loss_skips_games_without_evals() -> None:
     result = compute_player_wp_loss(games, PLAYER)
 
     assert result["games_count"] == 0
+    assert result["wp_loss"] is None
+
+
+@pytest.mark.unit
+def test_compute_player_wp_loss_skips_games_with_only_decided_positions() -> None:
+    """A game with no live-position moves doesn't become a per-game point."""
+    games = [
+        _make_game(
+            game_id=1,
+            white=PLAYER,
+            black=OPPONENT,
+            moves=[_make_move(color="White", eval_before=1_000, eval_after=900)],
+        ),
+    ]
+
+    result = compute_player_wp_loss(games, PLAYER)
+
+    assert result["games_count"] == 0
+    assert result["total_moves_analyzed"] == 0
     assert result["wp_loss"] is None
 
 

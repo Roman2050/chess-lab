@@ -127,6 +127,29 @@ def test_opening_wp_loss_present_for_analyzed() -> None:
 
 
 @pytest.mark.unit
+def test_opening_wp_loss_none_for_only_decided_positions() -> None:
+    """Analyzed moves outside the live WP window do not dilute opening WP."""
+    games = _games(
+        {
+            "winner": "White",
+            "is_analyzed": True,
+            "moves": [
+                {
+                    **_make_move(cp_loss=60, phase="opening"),
+                    "eval_before": 1_000,
+                    "eval_after": 900,
+                },
+            ],
+        }
+    )
+
+    row = compute_opening_stats(games, PLAYER)[0]
+
+    assert row["acpl_in_opening"] == 60.0
+    assert row["wp_loss_in_opening"] is None
+
+
+@pytest.mark.unit
 def test_opening_wp_loss_none_without_analyzed() -> None:
     """No analyzed games → wp_loss_in_opening is None (mirrors acpl_in_opening)."""
     games = _games({"winner": "White", "is_analyzed": False})

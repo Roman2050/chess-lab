@@ -68,7 +68,8 @@ async def get_accuracy_by_move_number(
     Each row carries both ``avg_cp_loss`` (raw centipawn loss) and
     ``avg_wp_loss`` (win-probability loss, §3.6): the latter is a flat
     per-move mean of :func:`move_wp_loss` over moves at that move number that
-    carry engine evals, or ``None`` when none do (keeps the row shape stable).
+    carry engine evals and start inside the calibrated live-position window,
+    or ``None`` when none do (keeps the row shape stable).
 
     Returns one row per ``move_num``, sorted ascending. ``games_count`` is
     the number of **distinct games** the player reached that move in —

@@ -1,9 +1,9 @@
-"""End-to-end Phase 5 report flow on a real Postgres.
+"""End-to-end Phase 5/6 report flow on a real Postgres.
 
 Only the LLM provider is mocked — the real model is never called in CI. The
 Celery task runs synchronously (``task_always_eager``) with its sync DB session
 and provider swapped for test-bound twins, so ``POST /report`` exercises the
-full enqueue → generate → persist path against the test database.
+full enqueue → WP-context → generate → persist path against the test database.
 """
 
 from __future__ import annotations
@@ -59,8 +59,11 @@ def eager_task(monkeypatch, sync_session_factory):
     POST endpoint's ``.delay`` executes the task synchronously (no Redis).
     """
 
+    generated_messages: list[tuple[str, str]] = []
+
     class _FakeProvider:
         def generate(self, system: str, user: str) -> str:
+            generated_messages.append((system, user))
             return MOCK_REPORT_TEXT
 
     monkeypatch.setattr(celery_module, "get_llm_provider", lambda: _FakeProvider())
@@ -81,7 +84,7 @@ def eager_task(monkeypatch, sync_session_factory):
 
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = True
-    yield
+    yield generated_messages
     celery_app.conf.task_always_eager = False
     celery_app.conf.task_eager_propagates = False
 
@@ -133,6 +136,8 @@ def _analyzed_game(idx: int, *, player: str = PLAYER) -> Game:
                     "color": "White",
                     "san": "e4",
                     "piece": "P",
+                    "eval_before": 0,
+                    "eval_after": -100,
                     "cp_loss": 20,
                     "classification": "excellent",
                     "phase": "opening",
@@ -143,6 +148,8 @@ def _analyzed_game(idx: int, *, player: str = PLAYER) -> Game:
                     "color": "White",
                     "san": "Nf3",
                     "piece": "N",
+                    "eval_before": -100,
+                    "eval_after": -50,
                     "cp_loss": 40,
                     "classification": "good",
                     "phase": "opening",
@@ -198,6 +205,14 @@ async def test_full_report_flow(
     assert snapshot["status"] == "ready"
     assert snapshot["report_text"] == MOCK_REPORT_TEXT
     assert snapshot["analyzed_games_count"] == THRESHOLD
+
+    assert len(eager_task) == 1
+    _, user_digest = eager_task[0]
+    assert "OVERALL WIN-PROBABILITY LOSS" in user_digest
+    assert "overall: 4.55" in user_digest
+    assert "wp loss" in user_digest
+    assert "ACPL" not in user_digest
+    assert "centipawn" not in user_digest.lower()
 
     get_resp = await client.get(f"/report/{PLAYER}")
     assert get_resp.status_code == 200
