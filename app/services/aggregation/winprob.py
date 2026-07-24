@@ -10,29 +10,29 @@ from app.services.aggregation.helpers import (
 
 _PHASES: tuple[str, ...] = ("opening", "middlegame", "endgame")
 
-# Логістична константа (Lichess-калібрування) — переводить перевагу в cp у
-# виграшні шанси. Винесена константою; калібрується у Phase 6 Чат 5.
+# Logistic constant (Lichess calibration) — converts centipawn advantage to win probability.
+# Extracted as a constant; calibrated in Phase 6 Chat 5.
 WP_SCALE = 0.00368208
 
-# Каліброване на реальних даних вікно «живої» позиції. Ходи, де шанси
-# сторони, що ходить, уже <= 20% або >= 90%, не входять у WP-середні:
-# насичена сигмоїда інакше розбавляє метрику майже нульовими втратами.
+# Calibrated window for "live" positions, based on real data. Moves where the
+# moving side's win probability is already <= 20% or >= 90% are excluded from
+# WP averages: the saturated sigmoid would otherwise dilute the metric with near-zero losses.
 LIVE_WP_MIN = 20.0
 LIVE_WP_MAX = 90.0
 
 
 def win_prob(cp_mover: float) -> float:
-    """Виграшні шанси сторони, що ходить (0..100 %), з її переваги в cp."""
+    """Win probability for the side to move (0..100 %), from its cp advantage."""
     return 100.0 / (1.0 + math.exp(-WP_SCALE * cp_mover))
 
 
 def move_wp_loss(move: dict) -> float | None:
-    """Втрачені % шансів у живій позиції, або ``None`` якщо хід не враховується.
+    """Lost win-probability % in a live position, or ``None`` if the move is skipped.
 
-    eval_before / eval_after — White-relative (див. engine.py/classifier.py),
-    тож для чорних інвертуємо знак. Ходи без оцінок і ходи поза каліброваним
-    вікном ``LIVE_WP_MIN < WP_before < LIVE_WP_MAX`` пропускаються. Читаємо
-    СИРІ eval (не кламповані); cap не потрібен.
+    eval_before / eval_after are White-relative (see engine.py/classifier.py),
+    so for Black we invert the sign. Moves without evals and moves outside the
+    calibrated window ``LIVE_WP_MIN < WP_before < LIVE_WP_MAX`` are skipped.
+    We read RAW evals (not clamped); no cap is needed.
     """
     eb = move.get("eval_before")
     ea = move.get("eval_after")
@@ -46,15 +46,15 @@ def move_wp_loss(move: dict) -> float | None:
 
 
 def compute_player_wp_loss(games: list[Game], player_name: str) -> dict:
-    """WP-двійник compute_player_acpl: overall / by_color / by_phase.
+    """WP counterpart of compute_player_acpl: overall / by_color / by_phase.
 
-    - overall та by_color — середнє з per-game середніх wp_loss (per-game =
-      mean(wp_loss) по ходах гравця), як у compute_player_acpl.
-    - by_phase — плоске середнє wp_loss по всіх ходах фази.
-    - Порожні зрізи → None (не 0).
-    Ходи без eval_before/eval_after та ходи у вирішених позиціях
-    (move_wp_loss -> None) пропускаються.
-    Партія без жодного придатного ходу не потрапляє у per-game середні.
+    - overall and by_color — mean of per-game mean wp_loss (per-game =
+      mean(wp_loss) over the player's moves), same as compute_player_acpl.
+    - by_phase — flat mean of wp_loss over all moves in that phase.
+    - Empty slices → None (not 0).
+    Moves without eval_before/eval_after and moves in decided positions
+    (move_wp_loss -> None) are skipped.
+    A game with no eligible moves is excluded from per-game averages.
     """
     if not games:
         return _empty_result(player_name)
@@ -80,8 +80,8 @@ def compute_player_wp_loss(games: list[Game], player_name: str) -> dict:
             if phase in phase_losses:
                 phase_losses[phase].append(wp)
 
-        # Партія без жодного придатного ходу (усі без eval) не дає per-game
-        # точки, щоб не забруднювати середнє «привидом».
+        # A game with no eligible moves (all missing eval) does not contribute
+        # a per-game point, so it does not pollute the average with a ghost.
         if not game_wp_losses:
             continue
 

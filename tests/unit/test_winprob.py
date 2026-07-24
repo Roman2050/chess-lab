@@ -64,7 +64,7 @@ def test_win_prob_bounds_and_symmetry() -> None:
 
 @pytest.mark.unit
 def test_win_prob_monotonic() -> None:
-    """Більша перевага в cp → не менші шанси."""
+    """Larger cp advantage → win probability is non-decreasing."""
     cps = [-2000, -500, -50, 0, 50, 500, 2000]
     probs = [win_prob(cp) for cp in cps]
     assert probs == sorted(probs)
@@ -77,7 +77,7 @@ def test_win_prob_monotonic() -> None:
 
 @pytest.mark.unit
 def test_move_wp_loss_white_vs_black_sign() -> None:
-    """Дзеркальні White/Black кейси дають однаковий (>0) wp_loss."""
+    """Mirrored White/Black cases yield the same (>0) wp_loss."""
     white = _make_move(color="White", eval_before=100, eval_after=-100)
     black = _make_move(color="Black", eval_before=-100, eval_after=100)
 
@@ -91,21 +91,21 @@ def test_move_wp_loss_white_vs_black_sign() -> None:
 
 @pytest.mark.unit
 def test_move_wp_loss_improving_move_is_zero() -> None:
-    """Хід, що покращує оцінку для сторони → clamped max(0,...) == 0.0."""
+    """A move that improves the side's eval → clamped max(0,...) == 0.0."""
     move = _make_move(color="White", eval_before=-100, eval_after=100)
     assert move_wp_loss(move) == 0.0
 
 
 @pytest.mark.unit
 def test_move_wp_loss_mate_saturates() -> None:
-    """Мат із живої позиції має скінченну WP-втрату."""
+    """Walking into mate from a live position has a finite WP loss."""
     walk_into_mate = _make_move(color="White", eval_before=0, eval_after=-10_000)
     assert move_wp_loss(walk_into_mate) == pytest.approx(50.0, abs=1.0)
 
 
 @pytest.mark.unit
 def test_move_wp_loss_skips_decided_positions() -> None:
-    """Ходи поза каліброваним живим WP-вікном не розбавляють середні."""
+    """Moves outside the calibrated live WP window do not dilute averages."""
     assert (LIVE_WP_MIN, LIVE_WP_MAX) == (20.0, 90.0)
 
     already_lost = _make_move(color="White", eval_before=-500, eval_after=-600)
