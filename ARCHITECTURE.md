@@ -163,12 +163,32 @@ class Game(Base):
     date_played   = Date    index
     pgn_content   = Text    NOT NULL          # clean PGN (no headers, no comments)
     analysis_data = JSONB   nullable          # see Section 5.3
-    is_analyzed   = Boolean default=False index
+    is_analyzed   = Boolean NOT NULL default=False index
+
+    # Analysis lifecycle (Phase 7) — see Section 7
+    analysis_status     = String   NOT NULL default "pending"  # pending|running|completed|failed
+    analysis_started_at = DateTime nullable   # set on every claim
+    analysis_error      = Text     nullable   # truncated str(exc) of the last failure
+    analysis_attempts   = Integer  NOT NULL default 0          # incremented by the claim
 
     # Composite indexes for player+winner filtering
     ix_games_white_winner (white_player, winner)
     ix_games_black_winner (black_player, winner)
+    # Partial index over the claimable slice — the batch fan-out scans only it
+    ix_games_pending_analysis (id) WHERE analysis_status IN ('pending', 'failed')
 ```
+
+**Invariant: `is_analyzed` is True if and only if `analysis_status == 'completed'`.**
+Both fields are written in the same transaction (Section 7, phase C). `is_analyzed`
+stays because the whole read side depends on it (aggregations, reports, progress);
+`analysis_status` exists to make execution *claimable*, which a boolean cannot express.
+A game is claimable by a worker from `pending` or `failed` only
+(`ANALYSIS_STATUS_CLAIMABLE` in `app/models/db.py`) — `POST /analyze/player/{username}`
+selects exactly that set, so games already `running` are never re-enqueued.
+
+There is no lease reaper: a worker killed mid-analysis leaves the row `running`, and
+`analysis_started_at` makes such stale jobs visible. Returning them to the queue
+automatically is a separate iteration (it needs a safe lease interval).
 
 ### 5.2 `PlayerReport` — LLM reports [PLANNED Phase 5]
 
@@ -288,13 +308,23 @@ is a one-shot generated text (not a chat): `POST` triggers a background Celery t
 
 ## 7. Background Processing Flow (Planned)
 
+Stockfish runs for minutes, so the task never holds a DB session while it works:
+`analyze_game` is three phases, two of them short transactions.
+
 ```
 FastAPI route → Celery task enqueue (Redis)
                      ↓
               Celery worker (sync)
                      ↓
-         get_sync_db_session() → fetch Game
+  ── phase A: claim (short transaction) ───────────────────────────
+    UPDATE games SET analysis_status='running', analysis_started_at=now(),
+                     analysis_error=NULL, analysis_attempts=attempts+1
+     WHERE id=:id AND analysis_status IN ('pending','failed')
+    RETURNING pgn_content
                      ↓
+    no row back → another worker owns it (or it is already completed) → return
+                     ↓
+  ── phase B: analyse (NO session open) ───────────────────────────
          Stockfish.analyse() with MultiPV=2
                      ↓
          classifier.py → cp_loss → classification
@@ -303,8 +333,20 @@ FastAPI route → Celery task enqueue (Redis)
                      ↓
          Build analysis_data JSON
                      ↓
-         Update Game: analysis_data=..., is_analyzed=True
+    exception → own short transaction: analysis_status='failed',
+                analysis_error=str(exc)[:1000] → re-raise
+                     ↓
+  ── phase C: save (short transaction) ────────────────────────────
+    UPDATE games SET analysis_data=..., is_analyzed=True,
+                     analysis_status='completed', analysis_error=NULL
 ```
+
+The claim, not the read-then-check in the router, is what makes the task idempotent:
+`UPDATE ... WHERE status IN (...) RETURNING` is a single statement, so two workers
+racing for the same game cannot both win — under READ COMMITTED the loser blocks on
+the row lock and re-evaluates the predicate after the winner commits, matching zero
+rows. `POST /games/{game_id}/analyze` still rejects an already-analyzed game with 400,
+but only as a fast, non-authoritative check.
 
 ### 7.1 Report Generation Flow (Planned, Phase 5)
 
@@ -363,7 +405,8 @@ is already used).
 ## 8. Implementation Roadmap
 
 **Phase 1 — Analysis Pipeline (Celery + Stockfish)**
-Configure Celery workers to pick up unanalyzed games (`is_analyzed=False`), run
+Configure Celery workers to pick up claimable games (`analysis_status` in
+`pending|failed`; before Phase 7: `is_analyzed=False`), run
 Stockfish with `MultiPV=2`, calculate `cp_loss`, assign `classification`, write
 `analysis_data` to DB, set `is_analyzed=True`.
 

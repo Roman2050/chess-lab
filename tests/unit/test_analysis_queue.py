@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.database import get_async_db
 
@@ -129,32 +128,33 @@ async def test_analysis_status_unknown_player_404(api_client, monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# analyze_game idempotency guard
+# get_unanalyzed_game_ids — which rows the fan-out picks up
 # ═══════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.unit
-def test_analyze_game_skips_already_analyzed(monkeypatch):
-    """An already-analyzed game must never spin up Stockfish again."""
-    import app.tasks.celery_app as celery_app
+@pytest.mark.asyncio
+async def test_unanalyzed_ids_selects_claimable_statuses_only():
+    """Games already `running` are skipped — only pending/failed are re-enqueued."""
+    from app.services.analysis_queue import get_unanalyzed_game_ids
 
-    monkeypatch.setattr(celery_app.settings, "STOCKFISH_PATH", "/usr/bin/stockfish")
+    captured: list = []
 
-    already_analyzed = SimpleNamespace(id=42, is_analyzed=True)
+    class _FakeDb:
+        async def execute(self, stmt):
+            captured.append(stmt)
+            result = MagicMock()
+            result.scalars.return_value.all.return_value = [7]
+            return result
 
-    fake_session = MagicMock()
-    fake_session.get.return_value = already_analyzed
+    ids = await get_unanalyzed_game_ids(_FakeDb(), PLAYER)
 
-    @contextmanager
-    def fake_sync_session():
-        yield fake_session
-
-    monkeypatch.setattr(celery_app, "get_sync_db_session", fake_sync_session)
-
-    engine_cls = MagicMock()
-    monkeypatch.setattr(celery_app, "StockfishEngine", engine_cls)
-
-    result = celery_app.analyze_game(42)
-
-    assert result is None
-    engine_cls.assert_not_called()
+    assert ids == [7]
+    sql = str(
+        captured[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "games.analysis_status IN ('pending', 'failed')" in sql
+    assert "is_analyzed" not in sql
+    assert "lower(games.white_player) = 'hero'" in sql

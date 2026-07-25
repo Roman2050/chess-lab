@@ -8,16 +8,14 @@ full enqueue → WP-context → generate → persist path against the test datab
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from datetime import date
 
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 import app.tasks.celery_app as celery_module
 from app.config import settings
@@ -32,22 +30,6 @@ MOCK_REPORT_TEXT = "MOCK REPORT: deterministic scouting narrative for testing."
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def sync_session_factory(test_db_env):
-    """A sessionmaker bound to the test Postgres for the Celery task to use."""
-    user = os.environ["DB_USER"]
-    password = os.environ["DB_PASSWORD"]
-    host = os.environ["DB_HOST"]
-    port = os.environ["DB_PORT"]
-    name = os.environ["DB_NAME"]
-    sync_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
-
-    engine = create_engine(sync_url, pool_pre_ping=True)
-    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    yield factory
-    engine.dispose()
 
 
 @pytest.fixture

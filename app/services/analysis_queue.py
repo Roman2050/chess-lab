@@ -1,11 +1,15 @@
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Game
+from app.models.db import ANALYSIS_STATUS_CLAIMABLE, Game
 
 
 async def get_unanalyzed_game_ids(db: AsyncSession, player_name: str) -> list[int]:
-    """Return ids of the player's games that have not been analyzed yet.
+    """Return ids of the player's games a worker could still pick up.
+
+    Filters on `analysis_status`, not `is_analyzed`: games currently being
+    analyzed (`running`) would otherwise be re-enqueued on every batch call, and
+    the worker would burn a claim on each of them just to discard it.
 
     Only ids are selected (never ORM objects) — the batch endpoint fans these
     out one-per-Celery-task, so the heavy `pgn_content`/`analysis_data` columns
@@ -17,7 +21,7 @@ async def get_unanalyzed_game_ids(db: AsyncSession, player_name: str) -> list[in
             func.lower(Game.white_player) == name_lower,
             func.lower(Game.black_player) == name_lower,
         ),
-        Game.is_analyzed == False,  # noqa: E712 — SQL boolean comparison, not Python identity
+        Game.analysis_status.in_(ANALYSIS_STATUS_CLAIMABLE),
     )
 
     result = await db.execute(stmt)

@@ -143,6 +143,9 @@ async def enqueue_game_analysis(
 
     Per ARCHITECTURE.md §6/§7, this hands off to a Celery worker via Redis;
     the actual engine work happens in `app.tasks.celery_app.analyze_game`.
+
+    The `is_analyzed` check below is a fast 400 for an obvious mistake, not the
+    concurrency guard — that is the atomic claim inside the task.
     """
     result = await db.execute(select(Game).where(Game.id == game_id))
     game = result.scalar_one_or_none()

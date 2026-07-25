@@ -5,8 +5,9 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 
 def _alembic_config() -> Config:
@@ -75,6 +76,26 @@ async def migrated_db(async_db_url, test_db_env):
     command.upgrade(cfg, "head")
 
     yield
+
+
+@pytest.fixture
+def sync_session_factory(test_db_env):
+    """A sessionmaker bound to the test Postgres — Celery tasks use sync sessions.
+
+    Migrations are not requested here (that fixture is async); tests pair this
+    with ``async_session`` / ``migrated_db`` when they need the schema.
+    """
+    user = os.environ["DB_USER"]
+    password = os.environ["DB_PASSWORD"]
+    host = os.environ["DB_HOST"]
+    port = os.environ["DB_PORT"]
+    name = os.environ["DB_NAME"]
+    sync_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
+
+    engine = create_engine(sync_url, pool_pre_ping=True)
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    yield factory
+    engine.dispose()
 
 
 @pytest_asyncio.fixture
