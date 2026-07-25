@@ -98,28 +98,30 @@ class StockfishEngine:
         return eval_cp, best_move_uci
 
     def analyse_game(self, pgn_content: str) -> list[dict]:
+        """Analyse every game position once and return per-move evaluations."""
         game = chess.pgn.read_game(io.StringIO(pgn_content))
         if game is None:
             return []
 
         board = game.board()
         moves = list(game.mainline_moves())
+        if not moves:
+            return []
+
         out: list[dict] = []
 
         with chess.engine.SimpleEngine.popen_uci(self._path) as engine:
             self._configure_uci_options(engine)
+            current_eval, current_best = self._analyse_position(engine, board)
+
             for ply, move in enumerate(moves, start=1):
-                # Analyse the pre-move position once: we need both the score
-                # (for cp_loss) and the engine's recommendation (for
-                # `best_move_engine` / tactical detector). The post-move
-                # analyse only feeds `eval_after`, so we discard its PV.
-                eval_before, best_move_uci = self._analyse_position(engine, board)
+                eval_before, best_move_uci = current_eval, current_best
                 side = board.turn
                 color = "White" if side == chess.WHITE else "Black"
                 san = board.san(move)
 
                 board.push(move)
-                eval_after, _ = self._analyse_position(engine, board)
+                current_eval, current_best = self._analyse_position(engine, board)
 
                 out.append(
                     {
@@ -127,7 +129,7 @@ class StockfishEngine:
                         "san": san,
                         "color": color,
                         "eval_before": eval_before,
-                        "eval_after": eval_after,
+                        "eval_after": current_eval,
                         "best_move": best_move_uci,
                     }
                 )
