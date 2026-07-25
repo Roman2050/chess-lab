@@ -9,9 +9,17 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
+
+
+# Analysis lifecycle: pending -> running -> completed | failed.
+# A game is claimable by a worker only from these two states: `pending` (never
+# analyzed) and `failed` (a previous attempt blew up and may be retried).
+ANALYSIS_STATUS_CLAIMABLE = ("pending", "failed")
+
 
 class Game(Base):
     __tablename__ = "games"
@@ -39,12 +47,32 @@ class Game(Base):
     pgn_content = Column(Text, nullable=False)
 
     analysis_data = Column(JSONB, nullable=True) 
-    is_analyzed = Column(Boolean, default=False, index=True)
+
+    # Invariant: is_analyzed is True if and only if analysis_status == 'completed'.
+    # Both are written in the same transaction by the analysis task.
+    is_analyzed = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"), index=True
+    )
+
+    # pending | running | completed | failed — see ANALYSIS_STATUS_CLAIMABLE
+    analysis_status = Column(
+        String, nullable=False, default="pending", server_default="pending"
+    )
+    analysis_started_at = Column(DateTime, nullable=True)
+    analysis_error = Column(Text, nullable=True)
+    analysis_attempts = Column(Integer, nullable=False, default=0, server_default="0")
 
 
     __table_args__ = (
         Index('ix_games_white_winner', 'white_player', 'winner'),
         Index('ix_games_black_winner', 'black_player', 'winner'),
+        # Claimable games are a small slice of the table, so the index that the
+        # batch fan-out scans stays tiny even as `completed` rows accumulate.
+        Index(
+            'ix_games_pending_analysis',
+            'id',
+            postgresql_where=text("analysis_status IN ('pending', 'failed')"),
+        ),
     )
 
 

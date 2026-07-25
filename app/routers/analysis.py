@@ -19,10 +19,11 @@ async def enqueue_player_analysis(
     username: str,
     db: AsyncSession = Depends(get_async_db),
 ):
-    """Fan out one Celery task per unanalyzed game of the player.
+    """Fan out one Celery task per not-yet-analyzed game of the player.
 
     One small task per game (not a mega-batch task) so a worker crash loses a
-    single game, and `-c N` on the worker gives parallelism.
+    single game, and `-c N` on the worker gives parallelism. Enqueuing the same
+    game twice is harmless: the task claims it atomically (see §7).
     """
     game_ids = await get_unanalyzed_game_ids(db, username)
 
