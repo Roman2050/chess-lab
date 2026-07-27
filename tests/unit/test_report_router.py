@@ -35,18 +35,42 @@ async def api_client(app, override_db):
 
 @pytest.fixture
 def patched(monkeypatch):
-    """Patch the router's collaborators and expose the mocks for assertions."""
+    """Patch the router's collaborators and expose the mocks for assertions.
+
+    The claim and the enqueue are attached to one parent mock so their relative
+    order is assertable — ``generating`` must be committed before the task can
+    possibly start.
+    """
     import app.routers.report as report_router
 
     count = AsyncMock()
     get = AsyncMock()
+    stale = AsyncMock(return_value=False)
+    upsert = AsyncMock(return_value=True)
+    release = AsyncMock()
     delay = MagicMock()
+
+    calls = MagicMock()
+    calls.attach_mock(upsert, "upsert")
+    calls.attach_mock(release, "release")
+    calls.attach_mock(delay, "delay")
 
     monkeypatch.setattr(report_router, "count_analyzed_games", count)
     monkeypatch.setattr(report_router, "get_report", get)
+    monkeypatch.setattr(report_router, "is_generation_stale", stale)
+    monkeypatch.setattr(report_router, "upsert_generating", upsert)
+    monkeypatch.setattr(report_router, "release_generating", release)
     monkeypatch.setattr(report_router.generate_player_report, "delay", delay)
 
-    return SimpleNamespace(count=count, get=get, delay=delay)
+    return SimpleNamespace(
+        count=count,
+        get=get,
+        stale=stale,
+        upsert=upsert,
+        release=release,
+        delay=delay,
+        calls=calls,
+    )
 
 
 def _make_report(
@@ -78,6 +102,71 @@ async def test_post_generate_enqueues_and_202(api_client, patched):
     body = resp.json()
     assert body["action"] == "generate"
     patched.delay.assert_called_once_with(PLAYER, "en")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_report_sets_generating_before_enqueue(api_client, patched):
+    """The status must be committed first, or the worker could outrun the row."""
+    patched.count.return_value = 20
+    patched.get.return_value = None
+
+    await api_client.post(f"/report/{PLAYER}")
+
+    _db, *claim_args = patched.upsert.await_args.args
+    assert claim_args == [PLAYER, "en", 20]
+    assert [name for name, *_ in patched.calls.mock_calls] == ["upsert", "delay"]
+    patched.release.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_lost_claim_race_does_not_enqueue(api_client, patched):
+    """Another request claimed the report between our read and our write."""
+    patched.count.return_value = 20
+    patched.get.return_value = None
+    patched.upsert.return_value = False
+
+    resp = await api_client.post(f"/report/{PLAYER}")
+
+    assert resp.status_code == 202
+    assert resp.json()["action"] == "already_generating"
+    patched.delay.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_stale_generation_is_reclaimed(api_client, patched):
+    """A `generating` row past its lease belongs to a dead worker — take it over."""
+    patched.count.return_value = 50
+    patched.get.return_value = _make_report(
+        analyzed_games_count=20, status="generating", report_text=None
+    )
+    patched.stale.return_value = True
+
+    resp = await api_client.post(f"/report/{PLAYER}")
+
+    assert resp.status_code == 202
+    assert resp.json()["action"] == "generate"
+    patched.delay.assert_called_once_with(PLAYER, "en")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_enqueue_failure_releases_the_claim(api_client, patched):
+    """A dead broker must not leave the player stuck behind a `generating` row."""
+    patched.count.return_value = 20
+    patched.get.return_value = None
+    patched.delay.side_effect = OSError("redis is down")
+
+    resp = await api_client.post(f"/report/{PLAYER}")
+
+    assert resp.status_code == 503
+    assert [name for name, *_ in patched.calls.mock_calls] == [
+        "upsert",
+        "delay",
+        "release",
+    ]
 
 
 @pytest.mark.unit
@@ -123,6 +212,7 @@ async def test_post_already_generating_202(api_client, patched):
 
     assert resp.status_code == 202
     assert resp.json()["action"] == "already_generating"
+    patched.upsert.assert_not_awaited()
     patched.delay.assert_not_called()
 
 

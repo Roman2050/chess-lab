@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     REPORT_LANGUAGE: str = "en"
     REPORT_REFRESH_THRESHOLD: int = Field(default=20, ge=1)
 
+    # How long a report may stay `generating` before another request is allowed
+    # to reclaim it: a worker killed mid-task leaves nothing behind that could
+    # move the row on. Keep it well above LLM_TIMEOUT — reclaiming a generation
+    # that is still alive costs a duplicate LLM call.
+    REPORT_GENERATION_LEASE_SECONDS: int = Field(default=900, ge=1)
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @computed_field
