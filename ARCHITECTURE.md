@@ -121,7 +121,7 @@ chess-lab/
 │   │   │   └── factory.py     #   get_llm_provider() from settings
 │   │   ├── report_context.py  # [PLANNED Phase 5] build ReportContext + derive_insights
 │   │   ├── report_prompt.py   # [PLANNED Phase 5] system prompt + context digest
-│   │   ├── report_repository.py  # [PLANNED Phase 5] PlayerReport CRUD (async read / sync write)
+│   │   ├── report_repository.py  # [PLANNED Phase 5] PlayerReport CRUD (async read + claim / sync write)
 │   │   └── report.py          # [PLANNED Phase 5] decide_report_action() + ReportAction
 │   ├── tasks/
 │   │   └── celery_app.py      # Celery app + analyze_game; [PLANNED Phase 5]
@@ -206,9 +206,17 @@ class PlayerReport(Base):
     created_at           = DateTime default=now()
     updated_at           = DateTime default=now() onupdate=now()
 
-    # One cached report per (player, language); upserted in place.
+    # One cached report per (player, language); upserted in place. Also the
+    # conflict target of the generation claim (Section 7.1).
     UniqueConstraint(player_name, language)
 ```
+
+`generating` doubles as the claim: the row is flipped by `POST /report` *before* the
+task is enqueued, and only the worker moves it on to `ready` / `failed`. Because a
+killed worker leaves nothing behind that could finish the job, `generating` carries a
+lease — a row untouched for `REPORT_GENERATION_LEASE_SECONDS` (default 900, well
+above `LLM_TIMEOUT`) is considered abandoned and may be reclaimed. `updated_at` is
+the lease clock: nothing else writes the row while it is `generating`.
 
 **Regeneration is driven by `analyzed_games_count`, not by date.** A report is
 (re)generated only when the count of the player's analyzed games has grown by at
@@ -357,29 +365,42 @@ phrases the supplied facts in prose. It never queries the DB and never invents d
 ```
 POST /report/{username}?language=en
         ↓
-  count_analyzed_games + get_report   (async read)
+  count_analyzed_games + get_report + lease check   (async reads)
         ↓
-  decide_report_action(current, report, threshold)   (pure)
+  decide_report_action(current, report, threshold, generation_is_stale)   (pure)
         ├── INSUFFICIENT_GAMES → 200 message (need {threshold}, have {current})
         ├── UP_TO_DATE         → 200 message (delta < threshold; GET returns cache)
         ├── ALREADY_GENERATING → 202 (a task is already running)
-        └── GENERATE           → enqueue Celery task → 202
+        └── GENERATE
+              ↓
+  ── claim (committed before the task exists) ──────────────────────
+    INSERT INTO player_reports (..., status='generating')
+    ON CONFLICT (player_name, language) DO UPDATE
+       SET status='generating', updated_at=now()
+     WHERE status <> 'generating' OR updated_at < now() - :lease
+ RETURNING id
+              ↓
+    no row back → another request owns it → 202 ALREADY_GENERATING
+              ↓
+    enqueue Celery task → 202
+    (enqueue raises → claim released → 503, the row is never left stuck)
                                        ↓
                           generate_player_report (sync worker)
                                        ↓
-              get_sync_db_session() + sync game fetch
-                                       ↓
-       build_report_context(): compute_player_acpl / accuracy / errors /
+  ── phase A: context (short transaction) ─────────────────────────
+       build_report_context(): compute_player_wp_loss / accuracy / errors /
               opening_stats  +  derive_insights()   → ReportContext
-              (Phase 6: report uses compute_player_wp_loss instead of ACPL —
-               win-probability loss for overall / color / phase / opening)
                                        ↓
+  ── phase B: generate (NO session open) ──────────────────────────
               build_messages() → (system, user) digest
                                        ↓
               get_llm_provider().generate()  (httpx, OpenAI-compatible)
                                        ↓
-       save PlayerReport: report_text, analyzed_games_count snapshot,
-              last_game_played_at, status=ready   (status=failed on LLMError)
+  ── phase C: save (short transaction) ────────────────────────────
+       PlayerReport: report_text, analyzed_games_count snapshot,
+              last_game_played_at, status=ready
+                                       ↓
+    any exception → fresh session: status=failed (previous text kept)
 ```
 
 Decision table (`threshold = REPORT_REFRESH_THRESHOLD`, default 20):
@@ -390,10 +411,19 @@ Decision table (`threshold = REPORT_REFRESH_THRESHOLD`, default 20):
 | No report | `current >= threshold` | `GENERATE` (first report) |
 | Report exists | `current - snapshot >= threshold` | `GENERATE` (refresh) |
 | Report exists | `current - snapshot < threshold` | `UP_TO_DATE` (serve cache) |
-| Report row | `status == "generating"` | `ALREADY_GENERATING` |
+| Report row | `status == "generating"`, lease alive | `ALREADY_GENERATING` |
+| Report row | `status == "generating"`, lease expired | treated as not in flight |
 
 Progress is read from `PlayerReport.status` in the DB (no Celery result backend),
-mirroring how batch-analysis progress is read from `is_analyzed`.
+mirroring how batch-analysis progress is read from `is_analyzed`. The decision above
+is advisory — the claim is what decides, exactly as in Section 7: the read can be
+stale by the time we act on it, so a request that loses the `ON CONFLICT` race
+downgrades itself to `ALREADY_GENERATING` instead of enqueueing a second task.
+
+The claim writes `analyzed_games_count` only when it inserts a new row. On an
+existing report the snapshot still describes the `report_text` that is about to be
+replaced; bumping it up front would make a *failed* generation look up to date and
+the report would never be regenerated.
 
 Model switching: a single `httpx` OpenAI-compatible provider covers Ollama (local,
 `http://localhost:11434/v1`) and remote services — switch via `LLM_BASE_URL` /
@@ -500,4 +530,5 @@ LLM_TIMEOUT=120                          # seconds per generation (1..600)
 
 REPORT_LANGUAGE=en                       # default report language
 REPORT_REFRESH_THRESHOLD=20              # new analyzed games needed to regenerate
+REPORT_GENERATION_LEASE_SECONDS=900      # when a stuck `generating` may be reclaimed
 ```
