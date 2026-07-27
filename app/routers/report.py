@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +12,16 @@ from app.schemas.report import (
     ReportStatusResponse,
 )
 from app.services.report import ReportAction, decide_report_action
-from app.services.report_repository import count_analyzed_games, get_report
+from app.services.report_repository import (
+    count_analyzed_games,
+    get_report,
+    is_generation_stale,
+    release_generating,
+    upsert_generating,
+)
 from app.tasks.celery_app import generate_player_report
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/report", tags=["Report"])
 
@@ -26,21 +35,49 @@ async def request_report(
 ):
     """Decide whether to (re)generate the report and act on it.
 
-    Thin HTTP glue: read state, run the pure decision, enqueue when needed. The
-    Celery task itself flips the row to ``generating`` (``upsert_generating_sync``)
-    so the queue-vs-DB transition stays in one place — here we only enqueue.
+    Thin HTTP glue: read state, run the pure decision, claim and enqueue when
+    needed. The row is flipped to ``generating`` here, before the task exists —
+    the worker only ever writes the outcome (``ready`` / ``failed``).
     """
     threshold = settings.REPORT_REFRESH_THRESHOLD
     current = await count_analyzed_games(db, username)
     report = await get_report(db, username, language)
-    action = decide_report_action(current, report, threshold)
+    action = decide_report_action(
+        current,
+        report,
+        threshold,
+        generation_is_stale=await is_generation_stale(db, report),
+    )
+
+    # The read above can be stale by the time we act on it; the claim is the
+    # authority on who generates, so a lost race downgrades the decision.
+    if action is ReportAction.GENERATE and not await upsert_generating(
+        db, username, language, current
+    ):
+        action = ReportAction.ALREADY_GENERATING
 
     report_games_count = report.analyzed_games_count if report is not None else None
     games_until_next_report: int | None = None
 
     match action:
         case ReportAction.GENERATE:
-            await asyncio.to_thread(generate_player_report.delay, username, language)
+            try:
+                await asyncio.to_thread(
+                    generate_player_report.delay, username, language
+                )
+            except Exception as exc:
+                # The row is already `generating` but no task will ever finish
+                # it, so hand the claim back instead of blocking the player
+                # until the lease expires.
+                await release_generating(db, username, language)
+                logger.exception(
+                    "request_report: could not enqueue generation for player=%s",
+                    username,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Report generation queue is unavailable, try again later",
+                ) from exc
             response.status_code = status.HTTP_202_ACCEPTED
             message = "Report generation started"
         case ReportAction.ALREADY_GENERATING:

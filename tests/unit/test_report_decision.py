@@ -61,3 +61,22 @@ def test_already_generating():
         decide_report_action(100, report, THRESHOLD)
         == ReportAction.ALREADY_GENERATING
     )
+
+
+@pytest.mark.unit
+def test_stale_generation_is_not_in_flight():
+    """Lease expired → the worker is gone, so the count rules take over again."""
+    report = _report(status="generating", report_text=None)
+    assert (
+        decide_report_action(100, report, THRESHOLD, generation_is_stale=True)
+        == ReportAction.GENERATE
+    )
+
+
+@pytest.mark.unit
+def test_stale_generation_still_needs_enough_games():
+    report = _report(status="generating", report_text=None)
+    assert (
+        decide_report_action(5, report, THRESHOLD, generation_is_stale=True)
+        == ReportAction.INSUFFICIENT_GAMES
+    )

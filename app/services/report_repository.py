@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, Insert, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.db import Game, PlayerReport
 
 
@@ -40,6 +42,118 @@ async def count_analyzed_games(db: AsyncSession, player_name: str) -> int:
     return result.scalar_one()
 
 
+def _lease_expired() -> ColumnElement[bool]:
+    """SQL predicate: the row has sat in `generating` longer than its lease.
+
+    Evaluated by Postgres against the same clock that wrote ``updated_at``;
+    ``updated_at`` is naive, so comparing it to the application's clock would
+    silently depend on how the two hosts are configured.
+    """
+    lease = timedelta(seconds=settings.REPORT_GENERATION_LEASE_SECONDS)
+    return PlayerReport.updated_at < func.now() - lease
+
+
+def generating_claim_stmt(
+    player_name: str,
+    language: str,
+    analyzed_games_count: int,
+) -> Insert:
+    """The claim INSERT: take ownership of a (player, language) report.
+
+    A single statement, so two requests racing for the same player cannot both
+    win — the loser's ``ON CONFLICT`` predicate no longer matches and it gets no
+    row back. A row that is already ``generating`` is reclaimable only once its
+    lease expired: nothing else would ever move it out of that state, because
+    the worker that owned it is gone.
+
+    ``analyzed_games_count`` is written on insert only. On an existing row the
+    snapshot still describes the ``report_text`` we are about to replace, and
+    bumping it here would make a failed generation look up to date.
+
+    Exposed separately from :func:`upsert_generating` so tests can inspect the
+    statement without a database.
+    """
+    return (
+        pg_insert(PlayerReport)
+        .values(
+            player_name=player_name,
+            language=language,
+            status="generating",
+            analyzed_games_count=analyzed_games_count,
+        )
+        .on_conflict_do_update(
+            constraint="uq_player_reports_player_lang",
+            # A core INSERT bypasses the ORM's `onupdate`, and the lease is read
+            # off `updated_at` — so it is set explicitly.
+            set_={"status": "generating", "updated_at": func.now()},
+            where=or_(PlayerReport.status != "generating", _lease_expired()),
+        )
+        .returning(PlayerReport.id)
+    )
+
+
+async def upsert_generating(
+    db: AsyncSession,
+    player_name: str,
+    language: str,
+    analyzed_games_count: int,
+) -> bool:
+    """Claim the report for generation; ``True`` when the caller may enqueue.
+
+    Commits: the FastAPI session dependency never does, and the worker must not
+    start before the ``generating`` row is visible to other requests.
+    """
+    claimed = await db.scalar(
+        generating_claim_stmt(player_name, language, analyzed_games_count)
+    )
+    await db.commit()
+    return claimed is not None
+
+
+async def release_generating(
+    db: AsyncSession,
+    player_name: str,
+    language: str,
+) -> None:
+    """Undo a claim whose task never made it onto the queue.
+
+    A placeholder row (no ``report_text`` yet) is deleted — it describes a report
+    that will never exist; a row still holding an older text is only flagged
+    ``failed``, so that text stays servable. Without this the row would answer
+    every request with ALREADY_GENERATING until its lease ran out.
+    """
+    deleted = await db.execute(
+        delete(PlayerReport)
+        .where(
+            PlayerReport.player_name == player_name,
+            PlayerReport.language == language,
+            PlayerReport.status == "generating",
+            PlayerReport.report_text.is_(None),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if deleted.rowcount == 0:
+        await db.execute(
+            update(PlayerReport)
+            .where(
+                PlayerReport.player_name == player_name,
+                PlayerReport.language == language,
+                PlayerReport.status == "generating",
+            )
+            .values(status="failed")
+            .execution_options(synchronize_session=False)
+        )
+    await db.commit()
+
+
+async def is_generation_stale(db: AsyncSession, report: PlayerReport | None) -> bool:
+    """True when a `generating` row has outlived its lease (its worker is gone)."""
+    if report is None or report.status != "generating":
+        return False
+    stmt = select(_lease_expired()).where(PlayerReport.id == report.id)
+    return bool(await db.scalar(stmt))
+
+
 def get_report_sync(
     db: Session,
     player_name: str,
@@ -51,35 +165,6 @@ def get_report_sync(
         PlayerReport.language == language,
     )
     return db.execute(stmt).scalar_one_or_none()
-
-
-def upsert_generating_sync(
-    db: Session,
-    player_name: str,
-    language: str,
-    analyzed_games_count: int,
-) -> PlayerReport:
-    """Mark a (player, language) report as ``generating``.
-
-    Creates a fresh row (``report_text`` left NULL) when none exists, otherwise
-    flips the existing one to ``generating`` while keeping the old
-    ``report_text`` so callers can still serve the previous report meanwhile.
-    Does not commit — the surrounding ``get_sync_db_session`` owns the txn.
-    """
-    report = get_report_sync(db, player_name, language)
-    if report is None:
-        report = PlayerReport(
-            player_name=player_name,
-            language=language,
-            status="generating",
-            analyzed_games_count=analyzed_games_count,
-        )
-        db.add(report)
-    else:
-        report.status = "generating"
-        report.analyzed_games_count = analyzed_games_count
-    db.flush()
-    return report
 
 
 def save_report_result_sync(
