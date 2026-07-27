@@ -8,7 +8,6 @@ from app.database import get_sync_db_session
 from app.models.db import ANALYSIS_STATUS_CLAIMABLE, Game
 from app.services.analysis.classifier import build_analysis_data
 from app.services.analysis.engine import StockfishEngine
-from app.services.llm.base import LLMError
 from app.services.llm.factory import get_llm_provider
 from app.services.report_context import build_report_context
 from app.services.report_prompt import build_messages
@@ -167,36 +166,61 @@ def analyze_game(game_id: int) -> None:
     return None
 
 
+def _mark_report_failed(player_name: str, language: str) -> None:
+    """Flag a report `failed` in a fresh session.
+
+    The session that ran the LLM call is already gone (or rolled back), so the
+    failure gets its own short transaction.
+    """
+    try:
+        with get_sync_db_session() as session:
+            mark_failed_sync(session, player_name, language)
+    except Exception:
+        logger.exception(
+            "generate_player_report: could not record failure for player=%s "
+            "(row stays 'generating' until its lease expires)",
+            player_name,
+        )
+
+
 @celery_app.task
 def generate_player_report(player_name: str, language: str) -> None:
     """Generate a player's scouting report via the LLM and persist it.
 
-    Background twin of :func:`analyze_game`: the LLM call is slow, so progress is
+    Background twin of :func:`analyze_game`, and phased the same way, because
+    the LLM call can take minutes and must not hold a DB connection:
+
+    A. context — the Phase 4 aggregations for this player (short txn)
+    B. generate — prompt + provider call, no session open
+    C. save — ``report_text`` + snapshot counters, status ``ready`` (short txn)
+
+    The row is already ``generating`` when we get here — the router claims it
+    before enqueueing, so the task only ever writes the outcome. Progress is
     tracked purely through ``PlayerReport.status`` (no Celery result backend).
-    Numbers are computed deterministically in :func:`build_report_context`; the
-    model only narrates them. An :class:`LLMError` must never crash the worker —
-    we catch it and mark the report ``failed``.
+    Numbers come from :func:`build_report_context`; the model only narrates them.
+    Nothing may crash the worker: *any* exception marks the report ``failed``,
+    otherwise the row would stay ``generating`` until its lease expires.
     """
     logger.info("generate_player_report: starting for player=%s", player_name)
 
-    with get_sync_db_session() as session:
-        try:
+    try:
+        with get_sync_db_session() as session:
             ctx = build_report_context(session, player_name, language)
 
-            # Nothing analyzed yet → no facts to narrate; don't poke the model.
-            if ctx.analyzed_games_count == 0:
-                logger.warning(
-                    "generate_player_report: no analyzed games for player=%s, "
-                    "marking failed",
-                    player_name,
-                )
-                mark_failed_sync(session, player_name, language)
-                return None
+        # Nothing analyzed yet → no facts to narrate; don't poke the model.
+        if ctx.analyzed_games_count == 0:
+            logger.warning(
+                "generate_player_report: no analyzed games for player=%s, "
+                "marking failed",
+                player_name,
+            )
+            _mark_report_failed(player_name, language)
+            return None
 
-            system, user = build_messages(ctx)
-            provider = get_llm_provider()
-            text = provider.generate(system, user)
+        system, user = build_messages(ctx)
+        text = get_llm_provider().generate(system, user)
 
+        with get_sync_db_session() as session:
             save_report_result_sync(
                 session,
                 player_name,
@@ -205,17 +229,18 @@ def generate_player_report(player_name: str, language: str) -> None:
                 analyzed_games_count=ctx.analyzed_games_count,
                 last_game_played_at=ctx.last_game_played_at,
             )
-            logger.info(
-                "generate_player_report: finished for player=%s (%d analyzed games)",
-                player_name,
-                ctx.analyzed_games_count,
-            )
-        except LLMError:
-            logger.exception(
-                "generate_player_report: report generation failed for %s",
-                player_name,
-            )
-            mark_failed_sync(session, player_name, language)
-            return None
+    except Exception:
+        logger.exception(
+            "generate_player_report: report generation failed for %s",
+            player_name,
+        )
+        _mark_report_failed(player_name, language)
+        return None
+
+    logger.info(
+        "generate_player_report: finished for player=%s (%d analyzed games)",
+        player_name,
+        ctx.analyzed_games_count,
+    )
 
     return None
