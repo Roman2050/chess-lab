@@ -72,6 +72,18 @@ the mover's pre-move winning chance is strictly inside the calibrated live windo
 skill buckets are `strong <= 2.5`, `solid <= 4.0`, `inconsistent <= 6.0`, and
 `weak > 6.0`. These narrative buckets may be recalibrated as the sample grows.
 
+**3.7 Read-Side Column Loading (Phase 7)**
+`games` carries two heavy columns — `pgn_content` and `analysis_data` (§5.1) — and a read
+path must load neither unless it actually uses it. `GET /games` selects only the columns
+`GameSummary` serializes; the aggregation fetches keep `analysis_data` (every metric is
+derived from it) and drop `pgn_content`. Both are expressed as
+`load_only(..., raiseload=True)`: `raiseload` turns an accidental access into an immediate
+error rather than a silent per-row SELECT (sync) or a `MissingGreenlet` raised far from the
+cause (async). `build_report_context` makes **one** fetch and filters the analyzed subset in
+memory, so a report never transfers the same `analysis_data` twice. The pagination COUNT is
+deliberately left alone — SQLAlchemy loader options don't propagate into `.subquery()`, and
+Postgres projects the unused columns away. No schema, response, or metric changes.
+
 ---
 
 ## 4. Project File Structure
@@ -100,7 +112,8 @@ chess-lab/
 │   ├── services/
 │   │   ├── lichess.py         # fetch_games_from_lichess() → raw PGN text
 │   │   ├── db_manager.py      # bulk_save_games() with on_conflict_do_nothing
-│   │   ├── game_queries.py    # get_filtered_games(): filters + pagination
+│   │   ├── game_queries.py    # get_filtered_games(): filters + pagination,
+│   │   │                      #   summary columns only (§3.7)
 │   │   ├── analysis_queue.py  # Batch-analysis fan-out + progress queries
 │   │   ├── analysis/          # Stockfish analysis pipeline
 │   │   │   ├── engine.py      # Stockfish wrapper, MultiPV config
@@ -108,7 +121,8 @@ chess-lab/
 │   │   │   ├── phase.py       # detect_phase(board, ply) → opening/middlegame/endgame
 │   │   │   └── tactical.py    # Heuristic tactical tag detector (fork, pin, hanging)
 │   │   ├── aggregation/       # Per-player stat aggregations (Phase 4)
-│   │   │   ├── helpers.py     # game fetch (async + sync) + move/color iterators
+│   │   │   ├── helpers.py     # game fetch (async + sync, no pgn_content §3.7)
+│   │   │   │                  #   + move/color iterators
 │   │   │   ├── acpl.py        # compute_player_acpl() weighted ACPL breakdown
 │   │   │   ├── winprob.py     # win_prob/move_wp_loss + compute_player_wp_loss()
 │   │   │   ├── accuracy.py    # accuracy by phase / by move number (+ avg_wp_loss, Phase 6)
@@ -290,7 +304,7 @@ read-side from them — no extra fields and no schema change are required.
 |---|---|---|
 | `POST` | `/games/lichess/{username}` | Fetch games from Lichess API, parse, save |
 | `POST` | `/games/upload` | Upload a `.pgn` file, parse, save |
-| `GET` | `/games` | Paginated list with filters (player_name, winner, sort) |
+| `GET` | `/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
 | `GET` | `/games/{game_id}` | Full game detail including pgn_content |
 | `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
 | `GET` | `/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
@@ -388,8 +402,9 @@ POST /report/{username}?language=en
                           generate_player_report (sync worker)
                                        ↓
   ── phase A: context (short transaction) ─────────────────────────
-       build_report_context(): compute_player_wp_loss / accuracy / errors /
-              opening_stats  +  derive_insights()   → ReportContext
+       build_report_context(): ONE game fetch (no pgn_content, §3.7), analyzed
+              subset filtered in memory → compute_player_wp_loss / accuracy /
+              errors / opening_stats  +  derive_insights()   → ReportContext
                                        ↓
   ── phase B: generate (NO session open) ──────────────────────────
               build_messages() → (system, user) digest
