@@ -5,10 +5,7 @@ from sqlalchemy.orm import Session
 from app.schemas.report import ReportContext, ReportInsights
 from app.services.aggregation.accuracy import compute_accuracy_by_phase
 from app.services.aggregation.errors import compute_error_patterns
-from app.services.aggregation.helpers import (
-    get_player_analyzed_games_sync,
-    get_player_games_sync,
-)
+from app.services.aggregation.helpers import get_player_games_sync
 from app.services.aggregation.openings import compute_opening_stats
 from app.services.aggregation.winprob import compute_player_wp_loss
 
@@ -55,9 +52,13 @@ def build_report_context(
     a Celery task. Win-rate / opening signals use *all* games; engine-derived
     metrics use only analyzed games. Deliberately does **not** call the LLM —
     this is purely the data-gathering stage.
+
+    One DB round-trip: the analyzed subset is filtered in memory rather than
+    re-queried, so the report never transfers the same ``analysis_data`` twice
+    (it is by far the heaviest column on `games`).
     """
     games_all = get_player_games_sync(db, player_name)
-    games_analyzed = get_player_analyzed_games_sync(db, player_name)
+    games_analyzed = [game for game in games_all if game.is_analyzed]
 
     wp = compute_player_wp_loss(games_analyzed, player_name)
     accuracy = compute_accuracy_by_phase(games_analyzed, player_name)

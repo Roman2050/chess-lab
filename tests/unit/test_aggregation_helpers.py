@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.services.aggregation.helpers import (
+    get_player_analyzed_games,
+    get_player_analyzed_games_sync,
+    get_player_games,
+    get_player_games_sync,
     iter_player_moves,
     resolve_player_color,
 )
@@ -99,3 +105,121 @@ def test_iter_player_moves_handles_missing_moves_key() -> None:
     game = _make_game(analysis_data={"summary": {"white_acpl": 12}})
 
     assert list(iter_player_moves(game, "White")) == []
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Which columns the fetch helpers pull
+# ═══════════════════════════════════════════════════════════════════
+
+
+class _FakeAsyncDb:
+    """AsyncSession stand-in recording the statement it was handed."""
+
+    def __init__(self) -> None:
+        self.executed: list = []
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        return result
+
+
+class _FakeSyncDb:
+    """Sync twin of :class:`_FakeAsyncDb` for the Celery-side helpers."""
+
+    def __init__(self) -> None:
+        self.executed: list = []
+
+    def execute(self, stmt):
+        self.executed.append(stmt)
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        return result
+
+
+def _sql(stmt) -> str:
+    return str(
+        stmt.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+
+async def _capture_async(fetch) -> str:
+    db = _FakeAsyncDb()
+    await fetch(db, "alice")
+    return _sql(db.executed[0])
+
+
+def _capture_sync(fetch) -> str:
+    db = _FakeSyncDb()
+    fetch(db, "alice")
+    return _sql(db.executed[0])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch", [get_player_games, get_player_analyzed_games], ids=["all", "analyzed"]
+)
+async def test_stats_flow_never_touches_pgn_async(fetch) -> None:
+    """No aggregation reads the raw PGN, so no fetch should transfer it."""
+    sql = await _capture_async(fetch)
+
+    assert "pgn_content" not in sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch",
+    [get_player_games_sync, get_player_analyzed_games_sync],
+    ids=["all", "analyzed"],
+)
+def test_stats_flow_never_touches_pgn_sync(fetch) -> None:
+    """Same guarantee on the sync path the report task runs on."""
+    sql = _capture_sync(fetch)
+
+    assert "pgn_content" not in sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch", [get_player_games, get_player_analyzed_games], ids=["all", "analyzed"]
+)
+async def test_analysis_data_is_still_loaded_async(fetch) -> None:
+    """`analysis_data` must stay eager — every metric is derived from it.
+
+    Including on the all-games fetch: `compute_opening_stats` reads per-move
+    output for the analyzed subset of that same result set.
+    """
+    sql = await _capture_async(fetch)
+
+    assert "games.analysis_data" in sql
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch",
+    [get_player_games_sync, get_player_analyzed_games_sync],
+    ids=["all", "analyzed"],
+)
+def test_analysis_data_is_still_loaded_sync(fetch) -> None:
+    """Sync twins load the same columns as their async counterparts."""
+    sql = _capture_sync(fetch)
+
+    assert "games.analysis_data" in sql
+
+
+@pytest.mark.unit
+async def test_analyzed_fetch_keeps_its_filters() -> None:
+    """Regression guard: column pruning didn't disturb the WHERE clause."""
+    db = _FakeAsyncDb()
+
+    await get_player_analyzed_games(db, "alice", time_control="blitz")
+
+    sql = _sql(db.executed[0])
+
+    assert "games.white_player = 'alice'" in sql
+    assert "games.black_player = 'alice'" in sql
+    assert "games.is_analyzed IS true" in sql
+    assert "games.time_control = 'blitz'" in sql

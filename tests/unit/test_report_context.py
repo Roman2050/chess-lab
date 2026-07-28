@@ -252,9 +252,6 @@ def test_build_report_context_uses_wp(monkeypatch) -> None:
     ]
 
     monkeypatch.setattr(rc, "get_player_games_sync", lambda db, name: games_all)
-    monkeypatch.setattr(
-        rc, "get_player_analyzed_games_sync", lambda db, name: games_analyzed
-    )
 
     ctx = build_report_context(db=None, player_name=PLAYER, language="uk")
 
@@ -271,3 +268,29 @@ def test_build_report_context_uses_wp(monkeypatch) -> None:
     assert set(ctx.accuracy_by_phase) == {"opening", "middlegame", "endgame"}
     assert ctx.openings  # at least one opening row
     assert ctx.insights is not None
+
+
+@pytest.mark.unit
+def test_report_context_single_fetch(monkeypatch) -> None:
+    """One query for the whole context; the analyzed subset is filtered in memory.
+
+    Re-querying it would transfer every analyzed game's `analysis_data` twice —
+    the heaviest column on `games` — and hold the task's session for longer.
+    """
+    games_all = [
+        _game(game_id=1, date_played=date(2025, 1, 1)),
+        _game(game_id=2, is_analyzed=False, date_played=date(2025, 3, 5)),
+    ]
+    calls: list[str] = []
+
+    def _fetch_all(db, name):
+        calls.append(name)
+        return games_all
+
+    monkeypatch.setattr(rc, "get_player_games_sync", _fetch_all)
+
+    ctx = build_report_context(db=None, player_name=PLAYER, language="uk")
+
+    assert calls == [PLAYER]
+    assert ctx.total_games_count == 2
+    assert ctx.analyzed_games_count == 1

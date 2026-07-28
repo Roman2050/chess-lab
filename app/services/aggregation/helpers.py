@@ -4,10 +4,35 @@ from typing import Iterator
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.models.db import Game
 from app.services.analysis.classifier import CP_LOSS_CAP
+
+# Everything the aggregations actually read, minus `pgn_content`: the raw PGN is
+# dead weight here (moves are read from `analysis_data`, ARCHITECTURE.md §5.3),
+# yet on a few hundred games it is the bulk of the bytes we'd pull over the wire.
+# `analysis_data` stays loaded — every metric in this package is derived from it,
+# and `compute_opening_stats` needs it even on the all-games fetch.
+_STAT_COLUMNS = (
+    Game.id,
+    Game.unique_id,
+    Game.white_player,
+    Game.black_player,
+    Game.result,
+    Game.winner,
+    Game.opening_name,
+    Game.time_control,
+    Game.date_played,
+    Game.is_analyzed,
+    Game.analysis_data,
+)
+
+# raiseload turns an accidental `game.pgn_content` into an immediate error
+# instead of a silent per-row SELECT (sync) or a MissingGreenlet raised far from
+# the cause (async). Same for the analysis_status family, which no aggregation
+# reads — add a column here if that ever changes.
+_STAT_LOAD_OPTIONS = (load_only(*_STAT_COLUMNS, raiseload=True),)
 
 
 async def get_player_games(
@@ -21,13 +46,17 @@ async def get_player_games(
     (win-rate, opening frequency). Caller is responsible for filtering on
     ``is_analyzed`` when it does — see :func:`get_player_analyzed_games` for
     the narrower variant.
+
+    ``analysis_data`` is still loaded: ``compute_opening_stats`` reads per-move
+    output for the analyzed subset. ``pgn_content`` is not (see
+    :data:`_STAT_LOAD_OPTIONS`).
     """
     stmt = select(Game).where(
         or_(
             Game.white_player == player_name,
             Game.black_player == player_name,
         ),
-    )
+    ).options(*_STAT_LOAD_OPTIONS)
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -50,6 +79,9 @@ async def get_player_analyzed_games(
     Player-color filtering happens downstream (see `resolve_player_color` /
     `iter_player_moves`) — ARCHITECTURE.md §3.1 keeps the engine output
     color-agnostic, so the per-player split is purely a read-side concern.
+
+    Loads ``analysis_data`` but not ``pgn_content`` (see
+    :data:`_STAT_LOAD_OPTIONS`).
     """
     stmt = select(Game).where(
         or_(
@@ -57,7 +89,7 @@ async def get_player_analyzed_games(
             Game.black_player == player_name,
         ),
         Game.is_analyzed.is_(True),
-    )
+    ).options(*_STAT_LOAD_OPTIONS)
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -74,15 +106,18 @@ def get_player_games_sync(
     """Sync twin of :func:`get_player_games` for Celery tasks.
 
     Celery runs on a sync DB session (`.cursorrules` / ARCHITECTURE.md), so the
-    async fetch above can't be reused there. Same query, same semantics — fetch
-    every game the player played, analyzed or not.
+    async fetch above can't be reused there. Same query, same semantics, same
+    column set — fetch every game the player played, analyzed or not.
+
+    This is the single fetch behind the whole report context, so the deferred
+    ``pgn_content`` matters most here: the task holds a session while it runs.
     """
     stmt = select(Game).where(
         or_(
             Game.white_player == player_name,
             Game.black_player == player_name,
         ),
-    )
+    ).options(*_STAT_LOAD_OPTIONS)
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -102,7 +137,7 @@ def get_player_analyzed_games_sync(
             Game.black_player == player_name,
         ),
         Game.is_analyzed.is_(True),
-    )
+    ).options(*_STAT_LOAD_OPTIONS)
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
