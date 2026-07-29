@@ -84,6 +84,24 @@ memory, so a report never transfers the same `analysis_data` twice. The paginati
 deliberately left alone — SQLAlchemy loader options don't propagate into `.subquery()`, and
 Postgres projects the unused columns away. No schema, response, or metric changes.
 
+**3.8 PGN Ingestion Contract (Phase 7)**
+`unique_id` identifies a game across re-imports and is the conflict target of the bulk
+insert, so it must be stable *and* collision-free. Lichess games take the last path
+segment of the `Site` URL. Everything else is hashed:
+`sha256("White|Black|Date|Result|clean_pgn")`, where `Date` is the **raw PGN tag**
+(possibly `"????.??.??"`), not the parsed `date_played` column, and `clean_pgn` is the
+output of `StringExporter(headers=False, variations=False, comments=False)` — the same
+text stored in `pgn_content`. The movetext is what makes the hash discriminating: the
+previous contract hashed the *initial* FEN, which is identical for every standard game,
+so two different games between the same players on the same day collided and
+`on_conflict_do_nothing` silently dropped the second one.
+
+Parsing is deliberately lenient about dates: an absent, partial or `????.??.??` tag
+yields `date_played = NULL` instead of aborting the upload, so one malformed game no
+longer costs the whole file. Uploads are bounded before the body is buffered — over
+`MAX_UPLOAD_BYTES` (20 MB) is a 413, a missing filename / wrong extension / non-UTF-8
+payload is a 400.
+
 ---
 
 ## 4. Project File Structure
@@ -167,14 +185,14 @@ class Game(Base):
     __tablename__ = "games"
 
     id            = Integer PK
-    unique_id     = String  UNIQUE NOT NULL   # Lichess ID or SHA-256 of moves+players+date
+    unique_id     = String  UNIQUE NOT NULL   # Lichess ID or sha256(...) — see §3.8
     white_player  = String  NOT NULL index
     black_player  = String  NOT NULL index
     result        = String  NOT NULL          # "1-0" | "0-1" | "1/2-1/2"
     winner        = String  index             # "White" | "Black" | "Draw"
     opening_name  = String  index             # from PGN tag OR ECO lookup
     time_control  = String
-    date_played   = Date    index
+    date_played   = Date    index nullable    # NULL when the PGN Date tag is absent or partial
     pgn_content   = Text    NOT NULL          # clean PGN (no headers, no comments)
     analysis_data = JSONB   nullable          # see Section 5.3
     is_analyzed   = Boolean NOT NULL default=False index
@@ -303,7 +321,7 @@ read-side from them — no extra fields and no schema change are required.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/games/lichess/{username}` | Fetch games from Lichess API, parse, save |
-| `POST` | `/games/upload` | Upload a `.pgn` file, parse, save |
+| `POST` | `/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
 | `GET` | `/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
 | `GET` | `/games/{game_id}` | Full game detail including pgn_content |
 | `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
