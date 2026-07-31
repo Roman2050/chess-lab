@@ -29,6 +29,8 @@ from app.services.aggregation.errors import compute_error_patterns
 from app.tasks.celery_app import analyze_game
 
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
 router = APIRouter(prefix="/games", tags=["Games Integration"])
 
 @router.post("/lichess/{username}", response_model=UploadResponse)
@@ -72,13 +74,27 @@ async def upload_pgn_file(
     """
     Loads games from a standard .pgn file.
     """
+    if not file.filename or not file.filename.strip():
+        raise HTTPException(status_code=400, detail="Filename is required")
+
     # File format validation
     if not file.filename.lower().endswith(".pgn"):
         raise HTTPException(status_code=400, detail="Only files with the .pgn extension may be uploaded")
 
+    # Check size before reading into memory if provided by server/client
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File size exceeds maximum limit of 20MB")
+
     try:
-        # Read the entire file into memory
+        # Read the file into memory
         content = await file.read()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Unable to read uploaded file")
+
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File size exceeds maximum limit of 20MB")
+
+    try:
         raw_pgn = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File encoding error. UTF-8 is expected.")

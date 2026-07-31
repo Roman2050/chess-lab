@@ -120,3 +120,30 @@ async def test_upload_happy_path_uses_parser_and_bulk_save(api_client, monkeypat
     assert body["stats"]["saved_new"] == 1
     assert body["stats"]["total_processed"] == 1
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upload_too_large_413(api_client, monkeypatch):
+    import app.routers.games as games_router
+
+    # Temporarily set MAX_UPLOAD_BYTES to 100 bytes for testing
+    monkeypatch.setattr(games_router, "MAX_UPLOAD_BYTES", 100)
+
+    large_content = b"x" * 150
+    files = {"file": ("games.pgn", large_content, "application/octet-stream")}
+    resp = await api_client.post("/games/upload", files=files)
+
+    assert resp.status_code == 413
+    assert "File size exceeds maximum limit" in resp.json()["detail"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upload_without_filename_400(api_client):
+    files = {"file": ("   ", b"some content", "application/octet-stream")}
+    resp = await api_client.post("/games/upload", files=files)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Filename is required"
+
+
