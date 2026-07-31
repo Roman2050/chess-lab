@@ -1,11 +1,26 @@
+from datetime import date, datetime
 import hashlib
 import io
-from datetime import datetime
 
 import chess
 import chess.pgn
 
 from app.services.eco import EcoLookup, get_eco_lookup
+
+
+def _parse_pgn_date(raw_date: str | None) -> date | None:
+    """
+    Parses PGN Date tag in 'YYYY.MM.DD' format into a datetime.date object.
+
+    Returns None for absent, partial ('????.??.??', '2026.??.??'), or malformed dates
+    so that one bad Date tag does not abort parsing of the whole file.
+    """
+    if not raw_date or "?" in raw_date:
+        return None
+    try:
+        return datetime.strptime(raw_date, "%Y.%m.%d").date()
+    except (ValueError, TypeError):
+        return None
 
 
 def _resolve_opening_name(game: chess.pgn.Game, eco_lookup: EcoLookup) -> str:
@@ -24,7 +39,14 @@ def _resolve_opening_name(game: chess.pgn.Game, eco_lookup: EcoLookup) -> str:
 
 
 def parse_pgn_text(pgn_text: str) -> list[dict]:
-    """Parses PGN text and returns a list of databases containing game data."""
+    """
+    Parses PGN text and returns a list of dictionaries containing game data.
+
+    Per ARCHITECTURE.md §3.8:
+    - Lichess games use the last path segment of the Site URL as `unique_id`.
+    - Custom PGNs use sha256("White|Black|Date|Result|clean_pgn").
+    - Date parsing is lenient: absent or malformed dates produce date_played = None.
+    """
     games_data = []
     pgn_io = io.StringIO(pgn_text)
     eco_lookup = get_eco_lookup()
@@ -44,18 +66,23 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
         if headers.get("Result") == "*":
             continue
 
-        # Attempt to retrieve Lichess ID
+        # Export the game back to a text-based PGN file for safekeeping
+        exporter = chess.pgn.StringExporter(headers=False, variations=False, comments=False)
+        clean_pgn = game.accept(exporter)
+
+        # Attempt to retrieve Lichess ID; fallback to sha256("White|Black|Date|Result|clean_pgn")
         site = headers.get("Site", "")
         if "lichess.org/" in site:
             unique_id = site.split("/")[-1]
         else:
-            # If it's a random file, we generate a hash from the moves, names, and date
-            raw_data = f"{headers.get('White')}{headers.get('Black')}{headers.get('Date')}{game.board().fen()}"
-            unique_id = hashlib.sha256(raw_data.encode()).hexdigest()
-
-        # Export the game back to a text-based PGN file for safekeeping
-        exporter = chess.pgn.StringExporter(headers=False, variations=False, comments=False)
-        clean_pgn = game.accept(exporter)
+            raw_data = "|".join([
+                headers.get("White", ""),
+                headers.get("Black", ""),
+                headers.get("Date", ""),
+                headers.get("Result", ""),
+                clean_pgn,
+            ])
+            unique_id = hashlib.sha256(raw_data.encode("utf-8")).hexdigest()
 
         result = headers.get("Result", "*")
         winner = None
@@ -80,7 +107,7 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
             "black_player": headers.get("Black", "Unknown"),
             "result": result,
             "winner": winner,
-            "date_played": datetime.strptime(headers.get("Date", None), "%Y.%m.%d").date(),
+            "date_played": _parse_pgn_date(headers.get("Date")),
             "opening_name": opening_name,
             "time_control": headers.get("TimeControl", None),
             "pgn_content": clean_pgn,
