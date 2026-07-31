@@ -144,3 +144,76 @@ def test_parse_pgn_text_defaults_unknown_players_and_none_opening_timecontrol() 
     assert isinstance(game["opening_name"], str)
     assert game["time_control"] is None
 
+
+@pytest.mark.unit
+def test_two_games_same_players_same_day_distinct_ids() -> None:
+    game1 = (
+        '[Event "Custom Game 1"]\n'
+        '[Site "https://example.com/g1"]\n'
+        '[Date "2026.07.30"]\n'
+        '[White "PlayerA"]\n'
+        '[Black "PlayerB"]\n'
+        '[Result "1-0"]\n'
+        '[Variant "Standard"]\n'
+        "\n"
+        "1. e4 e5 2. Nf3 Nc6 1-0\n"
+    )
+    game2 = (
+        '[Event "Custom Game 2"]\n'
+        '[Site "https://example.com/g2"]\n'
+        '[Date "2026.07.30"]\n'
+        '[White "PlayerA"]\n'
+        '[Black "PlayerB"]\n'
+        '[Result "1-0"]\n'
+        '[Variant "Standard"]\n'
+        "\n"
+        "1. d4 d5 2. c4 e6 1-0\n"
+    )
+
+    res1 = parse_pgn_text(game1)
+    res2 = parse_pgn_text(game2)
+
+    assert len(res1) == 1
+    assert len(res2) == 1
+    assert res1[0]["unique_id"] != res2[0]["unique_id"]
+
+
+@pytest.mark.unit
+def test_lichess_id_still_from_url() -> None:
+    lichess_pgn = (
+        '[Event "Lichess Game"]\n'
+        '[Site "https://lichess.org/abcdef12"]\n'
+        '[Date "2026.07.30"]\n'
+        '[White "PlayerA"]\n'
+        '[Black "PlayerB"]\n'
+        '[Result "1-0"]\n'
+        '[Variant "Standard"]\n'
+        "\n"
+        "1. e4 e5 1-0\n"
+    )
+    res = parse_pgn_text(lichess_pgn)
+    assert len(res) == 1
+    assert res[0]["unique_id"] == "abcdef12"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_date", ["????.??.??", "2026.??.??", "invalid", None])
+def test_unknown_date_parses_to_none_and_game_kept(bad_date: str | None) -> None:
+    date_header = f'[Date "{bad_date}"]\n' if bad_date is not None else ""
+    pgn = (
+        '[Event "Tolerant Date Test"]\n'
+        '[Site "https://example.com/g3"]\n'
+        f"{date_header}"
+        '[White "PlayerA"]\n'
+        '[Black "PlayerB"]\n'
+        '[Result "1-0"]\n'
+        '[Variant "Standard"]\n'
+        "\n"
+        "1. e4 e5 1-0\n"
+    )
+
+    res = parse_pgn_text(pgn)
+    assert len(res) == 1
+    assert res[0]["date_played"] is None
+
+
