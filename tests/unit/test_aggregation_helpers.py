@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.services.aggregation.helpers import (
+    count_player_analyzed_games_sync,
     get_player_analyzed_games,
     get_player_analyzed_games_sync,
     get_player_games,
@@ -49,6 +50,20 @@ def test_resolve_player_color_black() -> None:
     game = _make_game(white="alice", black="bob")
 
     assert resolve_player_color(game, "bob") == "Black"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("player_name", "expected"),
+    [("aLiCe", "White"), ("BoB", "Black")],
+)
+def test_resolve_player_color_case_insensitive(
+    player_name: str,
+    expected: str,
+) -> None:
+    game = _make_game(white="Alice", black="bOb")
+
+    assert resolve_player_color(game, player_name) == expected
 
 
 @pytest.mark.unit
@@ -148,14 +163,19 @@ def _sql(stmt) -> str:
 
 async def _capture_async(fetch) -> str:
     db = _FakeAsyncDb()
-    await fetch(db, "alice")
+    await fetch(db, "AlIcE")
     return _sql(db.executed[0])
 
 
 def _capture_sync(fetch) -> str:
     db = _FakeSyncDb()
-    fetch(db, "alice")
+    fetch(db, "AlIcE")
     return _sql(db.executed[0])
+
+
+def _assert_case_insensitive_player_predicates(sql: str) -> None:
+    assert "lower(games.white_player) = lower('AlIcE')" in sql
+    assert "lower(games.black_player) = lower('AlIcE')" in sql
 
 
 @pytest.mark.unit
@@ -211,6 +231,32 @@ def test_analysis_data_is_still_loaded_sync(fetch) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch", [get_player_games, get_player_analyzed_games], ids=["all", "analyzed"]
+)
+async def test_stats_queries_case_insensitive_async(fetch) -> None:
+    sql = await _capture_async(fetch)
+
+    _assert_case_insensitive_player_predicates(sql)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fetch",
+    [
+        get_player_games_sync,
+        get_player_analyzed_games_sync,
+        count_player_analyzed_games_sync,
+    ],
+    ids=["all", "analyzed", "count"],
+)
+def test_stats_queries_case_insensitive_sync(fetch) -> None:
+    sql = _capture_sync(fetch)
+
+    _assert_case_insensitive_player_predicates(sql)
+
+
+@pytest.mark.unit
 async def test_analyzed_fetch_keeps_its_filters() -> None:
     """Regression guard: column pruning didn't disturb the WHERE clause."""
     db = _FakeAsyncDb()
@@ -219,7 +265,7 @@ async def test_analyzed_fetch_keeps_its_filters() -> None:
 
     sql = _sql(db.executed[0])
 
-    assert "games.white_player = 'alice'" in sql
-    assert "games.black_player = 'alice'" in sql
+    assert "lower(games.white_player) = lower('alice')" in sql
+    assert "lower(games.black_player) = lower('alice')" in sql
     assert "games.is_analyzed IS true" in sql
     assert "games.time_control = 'blitz'" in sql

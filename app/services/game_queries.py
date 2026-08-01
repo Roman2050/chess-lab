@@ -33,11 +33,10 @@ async def get_filtered_games(
     stmt = select(Game)
     
     if player_name:
-        name_lower = player_name.lower()
         stmt = stmt.where(
             or_(
-                func.lower(Game.white_player) == name_lower,
-                func.lower(Game.black_player) == name_lower,
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
             )
         )
     if winner:

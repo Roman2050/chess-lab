@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
@@ -7,6 +8,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.database import get_async_db
+from app.services.analysis_queue import get_analysis_progress, get_unanalyzed_game_ids
 
 PLAYER = "hero"
 
@@ -136,8 +138,6 @@ async def test_analysis_status_unknown_player_404(api_client, monkeypatch):
 @pytest.mark.asyncio
 async def test_unanalyzed_ids_selects_claimable_statuses_only():
     """Games already `running` are skipped — only pending/failed are re-enqueued."""
-    from app.services.analysis_queue import get_unanalyzed_game_ids
-
     captured: list = []
 
     class _FakeDb:
@@ -147,7 +147,7 @@ async def test_unanalyzed_ids_selects_claimable_statuses_only():
             result.scalars.return_value.all.return_value = [7]
             return result
 
-    ids = await get_unanalyzed_game_ids(_FakeDb(), PLAYER)
+    ids = await get_unanalyzed_game_ids(_FakeDb(), "HeRo")
 
     assert ids == [7]
     sql = str(
@@ -157,4 +157,29 @@ async def test_unanalyzed_ids_selects_claimable_statuses_only():
     )
     assert "games.analysis_status IN ('pending', 'failed')" in sql
     assert "is_analyzed" not in sql
-    assert "lower(games.white_player) = 'hero'" in sql
+    assert "lower(games.white_player) = lower('HeRo')" in sql
+    assert "lower(games.black_player) = lower('HeRo')" in sql
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_progress_query_is_case_insensitive():
+    captured: list = []
+
+    class _FakeDb:
+        async def execute(self, stmt):
+            captured.append(stmt)
+            result = MagicMock()
+            result.one.return_value = SimpleNamespace(total=0, analyzed=0)
+            return result
+
+    progress = await get_analysis_progress(_FakeDb(), "HeRo")
+
+    assert progress == {"total": 0, "analyzed": 0, "pending": 0}
+    sql = str(
+        captured[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "lower(games.white_player) = lower('HeRo')" in sql
+    assert "lower(games.black_player) = lower('HeRo')" in sql

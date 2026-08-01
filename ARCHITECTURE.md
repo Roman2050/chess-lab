@@ -102,6 +102,18 @@ longer costs the whole file. Uploads are bounded before the body is buffered —
 `MAX_UPLOAD_BYTES` (20 MB) is a 413, a missing filename / wrong extension / non-UTF-8
 payload is a 400.
 
+**3.9 Case-Insensitive Player Identity (Phase 7)**
+Every database lookup by player name compares `lower(stored_player_name)` with
+`lower(requested_player_name)`. Functional indexes on `lower(white_player)` and
+`lower(black_player)` support game-list, aggregation, and analysis-queue reads; the
+existing exact-case indexes remain available until production usage is evaluated.
+
+For reports, the logical cache key and atomic generation-claim target are
+`(lower(player_name), language)`, with `language` intentionally case-sensitive. The
+first inserted `PlayerReport.player_name` casing is retained as its display value:
+later requests with different casing find and update the same row without rewriting
+that field.
+
 ---
 
 ## 4. Project File Structure
@@ -206,6 +218,9 @@ class Game(Base):
     # Composite indexes for player+winner filtering
     ix_games_white_winner (white_player, winner)
     ix_games_black_winner (black_player, winner)
+    # Functional indexes for case-insensitive player lookup
+    ix_games_white_player_lower (lower(white_player))
+    ix_games_black_player_lower (lower(black_player))
     # Partial index over the claimable slice — the batch fan-out scans only it
     ix_games_pending_analysis (id) WHERE analysis_status IN ('pending', 'failed')
 ```
@@ -238,17 +253,20 @@ class PlayerReport(Base):
     created_at           = DateTime default=now()
     updated_at           = DateTime default=now() onupdate=now()
 
-    # One cached report per (player, language); upserted in place. Also the
-    # conflict target of the generation claim (Section 7.1).
-    UniqueConstraint(player_name, language)
+    # One logical report per case-insensitive player and case-sensitive language.
+    # This expression index is also the generation claim's conflict target.
+    UNIQUE INDEX uq_player_reports_player_lang_lower
+        (lower(player_name), language)
 ```
 
-`generating` doubles as the claim: the row is flipped by `POST /report` *before* the
-task is enqueued, and only the worker moves it on to `ready` / `failed`. Because a
-killed worker leaves nothing behind that could finish the job, `generating` carries a
-lease — a row untouched for `REPORT_GENERATION_LEASE_SECONDS` (default 900, well
-above `LLM_TIMEOUT`) is considered abandoned and may be reclaimed. `updated_at` is
-the lease clock: nothing else writes the row while it is `generating`.
+The unique expression index makes report identity case-insensitive without changing
+the stored display value. `generating` doubles as the claim: the row is flipped by
+`POST /report` *before* the task is enqueued, and only the worker moves it on to
+`ready` / `failed`. Because a killed worker leaves nothing behind that could finish
+the job, `generating` carries a lease — a row untouched for
+`REPORT_GENERATION_LEASE_SECONDS` (default 900, well above `LLM_TIMEOUT`) is
+considered abandoned and may be reclaimed. `updated_at` is the lease clock: nothing
+else writes the row while it is `generating`.
 
 **Regeneration is driven by `analyzed_games_count`, not by date.** A report is
 (re)generated only when the count of the player's analyzed games has grown by at
@@ -332,6 +350,10 @@ read-side from them — no extra fields and no schema change are required.
 | `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
 
+Every endpoint parameter that identifies a player is case-insensitive on the
+database read side (§3.9); response shapes and the requested display spelling are
+unchanged.
+
 **Planned endpoints (Phase 5):**
 
 | Method | Path | Description |
@@ -407,7 +429,7 @@ POST /report/{username}?language=en
               ↓
   ── claim (committed before the task exists) ──────────────────────
     INSERT INTO player_reports (..., status='generating')
-    ON CONFLICT (player_name, language) DO UPDATE
+    ON CONFLICT (lower(player_name), language) DO UPDATE
        SET status='generating', updated_at=now()
      WHERE status <> 'generating' OR updated_at < now() - :lease
  RETURNING id
@@ -457,6 +479,11 @@ The claim writes `analyzed_games_count` only when it inserts a new row. On an
 existing report the snapshot still describes the `report_text` that is about to be
 replaced; bumping it up front would make a *failed* generation look up to date and
 the report would never be regenerated.
+
+The conflict target follows the case-insensitive report identity from §3.9. A
+cross-case request therefore cannot enqueue a second live generation, and the
+conflict update deliberately omits `player_name` so the first row's display casing
+is preserved.
 
 Model switching: a single `httpx` OpenAI-compatible provider covers Ollama (local,
 `http://localhost:11434/v1`) and remote services — switch via `LLM_BASE_URL` /

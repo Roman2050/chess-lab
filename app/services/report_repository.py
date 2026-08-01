@@ -18,7 +18,7 @@ async def get_report(
 ) -> PlayerReport | None:
     """Fetch the persisted report for a (player, language) pair, if any."""
     stmt = select(PlayerReport).where(
-        PlayerReport.player_name == player_name,
+        func.lower(PlayerReport.player_name) == func.lower(player_name),
         PlayerReport.language == language,
     )
     result = await db.execute(stmt)
@@ -32,8 +32,8 @@ async def count_analyzed_games(db: AsyncSession, player_name: str) -> int:
         .select_from(Game)
         .where(
             or_(
-                Game.white_player == player_name,
-                Game.black_player == player_name,
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
             ),
             Game.is_analyzed.is_(True),
         )
@@ -82,7 +82,10 @@ def generating_claim_stmt(
             analyzed_games_count=analyzed_games_count,
         )
         .on_conflict_do_update(
-            constraint="uq_player_reports_player_lang",
+            index_elements=(
+                func.lower(PlayerReport.player_name),
+                PlayerReport.language,
+            ),
             # A core INSERT bypasses the ORM's `onupdate`, and the lease is read
             # off `updated_at` — so it is set explicitly.
             set_={"status": "generating", "updated_at": func.now()},
@@ -125,7 +128,7 @@ async def release_generating(
     deleted = await db.execute(
         delete(PlayerReport)
         .where(
-            PlayerReport.player_name == player_name,
+            func.lower(PlayerReport.player_name) == func.lower(player_name),
             PlayerReport.language == language,
             PlayerReport.status == "generating",
             PlayerReport.report_text.is_(None),
@@ -136,7 +139,7 @@ async def release_generating(
         await db.execute(
             update(PlayerReport)
             .where(
-                PlayerReport.player_name == player_name,
+                func.lower(PlayerReport.player_name) == func.lower(player_name),
                 PlayerReport.language == language,
                 PlayerReport.status == "generating",
             )
@@ -161,7 +164,7 @@ def get_report_sync(
 ) -> PlayerReport | None:
     """Sync twin of :func:`get_report` for Celery tasks."""
     stmt = select(PlayerReport).where(
-        PlayerReport.player_name == player_name,
+        func.lower(PlayerReport.player_name) == func.lower(player_name),
         PlayerReport.language == language,
     )
     return db.execute(stmt).scalar_one_or_none()

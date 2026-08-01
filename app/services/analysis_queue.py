@@ -15,11 +15,10 @@ async def get_unanalyzed_game_ids(db: AsyncSession, player_name: str) -> list[in
     out one-per-Celery-task, so the heavy `pgn_content`/`analysis_data` columns
     must not be loaded here.
     """
-    name_lower = player_name.lower()
     stmt = select(Game.id).where(
         or_(
-            func.lower(Game.white_player) == name_lower,
-            func.lower(Game.black_player) == name_lower,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         ),
         Game.analysis_status.in_(ANALYSIS_STATUS_CLAIMABLE),
     )
@@ -34,7 +33,6 @@ async def get_analysis_progress(db: AsyncSession, player_name: str) -> dict:
     Uses a conditional aggregate (FILTER) so both counts come back in one
     round-trip instead of two separate queries.
     """
-    name_lower = player_name.lower()
     stmt = select(
         func.count().label("total"),
         func.count()
@@ -42,8 +40,8 @@ async def get_analysis_progress(db: AsyncSession, player_name: str) -> dict:
         .label("analyzed"),
     ).where(
         or_(
-            func.lower(Game.white_player) == name_lower,
-            func.lower(Game.black_player) == name_lower,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         )
     )
 

@@ -53,8 +53,8 @@ async def get_player_games(
     """
     stmt = select(Game).where(
         or_(
-            Game.white_player == player_name,
-            Game.black_player == player_name,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         ),
     ).options(*_STAT_LOAD_OPTIONS)
 
@@ -85,8 +85,8 @@ async def get_player_analyzed_games(
     """
     stmt = select(Game).where(
         or_(
-            Game.white_player == player_name,
-            Game.black_player == player_name,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         ),
         Game.is_analyzed.is_(True),
     ).options(*_STAT_LOAD_OPTIONS)
@@ -114,8 +114,8 @@ def get_player_games_sync(
     """
     stmt = select(Game).where(
         or_(
-            Game.white_player == player_name,
-            Game.black_player == player_name,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         ),
     ).options(*_STAT_LOAD_OPTIONS)
 
@@ -133,8 +133,8 @@ def get_player_analyzed_games_sync(
     """Sync twin of :func:`get_player_analyzed_games` for Celery tasks."""
     stmt = select(Game).where(
         or_(
-            Game.white_player == player_name,
-            Game.black_player == player_name,
+            func.lower(Game.white_player) == func.lower(player_name),
+            func.lower(Game.black_player) == func.lower(player_name),
         ),
         Game.is_analyzed.is_(True),
     ).options(*_STAT_LOAD_OPTIONS)
@@ -157,8 +157,8 @@ def count_player_analyzed_games_sync(db: Session, player_name: str) -> int:
         .select_from(Game)
         .where(
             or_(
-                Game.white_player == player_name,
-                Game.black_player == player_name,
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
             ),
             Game.is_analyzed.is_(True),
         )
@@ -175,9 +175,10 @@ def resolve_player_color(game: Game, player_name: str) -> str:
     but we'd rather crash loudly than silently mis-attribute moves to the
     wrong color in the downstream report.
     """
-    if game.white_player == player_name:
+    player_name_lower = player_name.lower()
+    if game.white_player.lower() == player_name_lower:
         return "White"
-    if game.black_player == player_name:
+    if game.black_player.lower() == player_name_lower:
         return "Black"
     raise ValueError(f"Player {player_name} not found in game {game.id}")
 
