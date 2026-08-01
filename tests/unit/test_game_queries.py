@@ -115,8 +115,8 @@ async def test_filtered_games_filters_and_paginates_in_sql() -> None:
 
     sql = _sql(db.executed[0])
 
-    assert "lower(games.white_player) = 'hero'" in sql
-    assert "lower(games.black_player) = 'hero'" in sql
+    assert "lower(games.white_player) = lower('hero')" in sql
+    assert "lower(games.black_player) = lower('hero')" in sql
     assert "lower(games.winner) = 'draw'" in sql
     assert "ORDER BY games.id" in sql
     assert "LIMIT 10" in sql
