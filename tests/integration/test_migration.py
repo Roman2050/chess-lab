@@ -9,6 +9,15 @@ from sqlalchemy import text
 STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 
+def _load_migration(filename: str, module_name: str):
+    repo_root = Path(__file__).resolve().parents[2]
+    migration_path = repo_root / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(module_name, migration_path)
+    migration_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration_mod)
+    return migration_mod
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_migration_rehashes_custom_rows_only(async_session, sync_session_factory):
@@ -47,12 +56,10 @@ async def test_migration_rehashes_custom_rows_only(async_session, sync_session_f
     )
     await async_session.commit()
 
-    # Load migration module dynamically
-    repo_root = Path(__file__).resolve().parents[2]
-    migration_path = repo_root / "alembic" / "versions" / "d8f2e3a4b5c6_rehash_custom_pgn_unique_id.py"
-    spec = importlib.util.spec_from_file_location("migration_d8f2e3a4b5c6", migration_path)
-    migration_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration_mod)
+    migration_mod = _load_migration(
+        "d8f2e3a4b5c6_rehash_custom_pgn_unique_id.py",
+        "migration_d8f2e3a4b5c6",
+    )
 
     # Execute migration upgrade logic using a sync session bind
     with sync_session_factory() as sync_session:
@@ -74,3 +81,75 @@ async def test_migration_rehashes_custom_rows_only(async_session, sync_session_f
         {"lichess_id": lichess_id},
     )
     assert res_lichess.scalar_one() == lichess_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_case_insensitive_migration_rejects_report_duplicates(async_session):
+    migration_mod = _load_migration(
+        "e2f4a6b8c0d1_case_insensitive_player_identity.py",
+        "migration_e2f4a6b8c0d1",
+    )
+
+    try:
+        await async_session.execute(
+            text("DROP INDEX uq_player_reports_player_lang_lower")
+        )
+        await async_session.execute(
+            text(
+                """
+                INSERT INTO player_reports (player_name, language)
+                VALUES ('MagnusCarlsen', 'en'), ('magnuscarlsen', 'en')
+                """
+            )
+        )
+
+        def _run_upgrade(sync_session) -> None:
+            with patch("alembic.op.get_bind", return_value=sync_session):
+                migration_mod.upgrade()
+
+        with pytest.raises(RuntimeError) as excinfo:
+            await async_session.run_sync(_run_upgrade)
+
+        message = str(excinfo.value)
+        assert "('magnuscarlsen', 'en', 2)" in message
+        assert "Resolve them manually" in message
+    finally:
+        await async_session.rollback()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_case_insensitive_functional_index_definitions(async_session):
+    result = await async_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname IN (
+                  'ix_games_white_player_lower',
+                  'ix_games_black_player_lower',
+                  'uq_player_reports_player_lang_lower'
+              )
+            """
+        )
+    )
+    definitions = {
+        name: " ".join(indexdef.lower().split()) for name, indexdef in result.all()
+    }
+
+    assert set(definitions) == {
+        "ix_games_white_player_lower",
+        "ix_games_black_player_lower",
+        "uq_player_reports_player_lang_lower",
+    }
+    assert "lower((white_player)::text)" in definitions[
+        "ix_games_white_player_lower"
+    ]
+    assert "lower((black_player)::text)" in definitions[
+        "ix_games_black_player_lower"
+    ]
+    report_index = definitions["uq_player_reports_player_lang_lower"]
+    assert report_index.startswith("create unique index")
+    assert "(lower((player_name)::text), language)" in report_index

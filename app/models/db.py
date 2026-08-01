@@ -7,7 +7,6 @@ from sqlalchemy import (
     Date,
     DateTime,
     Index,
-    UniqueConstraint,
     func,
     text,
 )
@@ -66,6 +65,8 @@ class Game(Base):
     __table_args__ = (
         Index('ix_games_white_winner', 'white_player', 'winner'),
         Index('ix_games_black_winner', 'black_player', 'winner'),
+        Index('ix_games_white_player_lower', func.lower(white_player)),
+        Index('ix_games_black_player_lower', func.lower(black_player)),
         # Claimable games are a small slice of the table, so the index that the
         # batch fan-out scans stays tiny even as `completed` rows accumulate.
         Index(
@@ -102,5 +103,10 @@ class PlayerReport(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint('player_name', 'language', name='uq_player_reports_player_lang'),
+        Index(
+            'uq_player_reports_player_lang_lower',
+            func.lower(player_name),
+            language,
+            unique=True,
+        ),
     )
