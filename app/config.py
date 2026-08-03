@@ -1,4 +1,4 @@
-from pydantic import Field, computed_field
+from pydantic import Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_NAME: str
     redis_url: str | None = None
+
+    # Required for every mutating or expensive API operation. There is no
+    # development fallback: missing configuration must fail at import/startup.
+    MVP_API_KEY: SecretStr = Field(min_length=32, repr=False)
 
     # Stockfish — path is optional (analysis tasks no-op when missing); the
     # tuning knobs have engine-sane defaults. Ranges are sanity bounds, not
@@ -36,7 +40,11 @@ class Settings(BaseSettings):
     # that is still alive costs a duplicate LLM call.
     REPORT_GENERATION_LEASE_SECONDS: int = Field(default=900, ge=1)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        hide_input_in_errors=True,
+    )
 
     @computed_field
     @property
@@ -62,4 +70,4 @@ class Settings(BaseSettings):
             database=self.DB_NAME,
         ).render_as_string(hide_password=False)
     
-settings = Settings()   
+settings = Settings()

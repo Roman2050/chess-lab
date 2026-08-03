@@ -11,6 +11,7 @@ from app.schemas.report import (
     ReportResponse,
     ReportStatusResponse,
 )
+from app.security import require_mvp_api_key
 from app.services.report import ReportAction, decide_report_action
 from app.services.report_repository import (
     count_analyzed_games,
@@ -26,7 +27,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/report", tags=["Report"])
 
 
-@router.post("/{username}", response_model=ReportRequestResponse)
+@router.post(
+    "/{username}",
+    response_model=ReportRequestResponse,
+    dependencies=[Depends(require_mvp_api_key)],
+)
 async def request_report(
     username: str,
     response: Response,
