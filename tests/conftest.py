@@ -4,13 +4,17 @@ import httpx
 import pytest
 
 
-# IMPORTANT: The app config is loaded at import time (Settings()) and requires DB_* vars.
-# We set safe defaults for local/dev test runs so imports don't crash.
+# IMPORTANT: The app config is loaded at import time (Settings()) and requires
+# DB_* plus MVP_API_KEY. Tests use a dedicated non-production key and set all
+# required values before importing any application module.
+TEST_MVP_API_KEY = "test-mvp-api-key-0123456789abcdef"
+
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5432")
 os.environ.setdefault("DB_USER", "chess")
 os.environ.setdefault("DB_PASSWORD", "chess")
 os.environ.setdefault("DB_NAME", "chess_lab")
+os.environ["MVP_API_KEY"] = TEST_MVP_API_KEY
 
 
 @pytest.fixture(scope="session")
@@ -18,6 +22,11 @@ def app():
     from app.main import app as fastapi_app
 
     return fastapi_app
+
+
+@pytest.fixture(scope="session")
+def auth_headers() -> dict[str, str]:
+    return {"X-API-Key": TEST_MVP_API_KEY}
 
 
 @pytest.fixture

@@ -72,7 +72,7 @@ def eager_task(monkeypatch, sync_session_factory):
 
 
 @pytest_asyncio.fixture
-async def client(app, async_db_url, migrated_db):
+async def client(app, async_db_url, migrated_db, auth_headers):
     """ASGI client whose ``get_async_db`` points at the test Postgres."""
     engine = create_async_engine(async_db_url, pool_pre_ping=True)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -83,7 +83,11 @@ async def client(app, async_db_url, migrated_db):
 
     app.dependency_overrides[get_async_db] = _override
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers=auth_headers,
+    ) as c:
         yield c
     app.dependency_overrides.clear()
     await engine.dispose()
