@@ -20,6 +20,10 @@ _MISTAKE_MAX = 300
 # This does NOT touch classification: everything over 300 is already "blunder".
 CP_LOSS_CAP = 1000
 
+# Minimum gap between the best and second-best lines for a meaningful
+# "only move" signal. This is provisional and can be calibrated later.
+ONLY_MOVE_GAP_CP = 200
+
 _ERROR_CLASSES: frozenset[str] = frozenset({"inaccuracy", "mistake", "blunder"})
 
 # Heuristic for `summary.advantage_lost`: a side held a meaningful edge
@@ -80,6 +84,26 @@ def _cp_loss_for_move(color: str, eval_before: int, eval_after: int) -> int:
     return min(max(0, loss), CP_LOSS_CAP)
 
 
+def _is_only_move(
+    color: str,
+    best_eval_cp: int,
+    second_eval_cp: int | None,
+) -> bool:
+    """Whether the best MultiPV line is clearly superior for the mover.
+
+    Evaluations are White-relative, so the gap direction reverses for Black.
+    A missing second line returns `False`: positions with only one legal reply
+    are trivially forced and do not provide a useful "only move" signal.
+    """
+    if second_eval_cp is None:
+        return False
+    if color == "White":
+        gap = best_eval_cp - second_eval_cp
+    else:
+        gap = second_eval_cp - best_eval_cp
+    return gap >= ONLY_MOVE_GAP_CP
+
+
 def _parse_best_move(value: object, board: chess.Board) -> chess.Move | None:
     """Coerce an engine `best_move` payload (UCI string) into a legal `chess.Move`.
 
@@ -120,7 +144,8 @@ def build_analysis_data(moves: list[dict]) -> dict:
     """Assemble the final `analysis_data` JSON from raw engine evaluations.
 
     Input format (from `StockfishEngine.analyse_game`):
-        [{"ply", "san", "color", "eval_before", "eval_after"}, ...]
+        [{"ply", "san", "color", "eval_before", "eval_after",
+          "best_move", "second_eval_cp"}, ...]
 
     Output matches ARCHITECTURE.md §5.3. Per §3.4, the FEN fields,
     `best_move_engine`, and `tactical_tags` are emitted **only** for
@@ -129,8 +154,8 @@ def build_analysis_data(moves: list[dict]) -> dict:
     SAN is replayed on a `chess.Board` here (not in engine.py) so we can attach
     `fen_before` / `fen_after` to error moves without inflating the engine API.
     The engine ships `best_move` as UCI (e.g. ``"e2e4"``); we convert it to SAN
-    on `board_before` for storage. `is_only_move` is still a Phase-3 placeholder
-    pending MultiPV gap analysis.
+    on `board_before` for storage. `second_eval_cp` is used only to derive
+    `is_only_move` and is never included in the stored `analysis_data`.
     """
     board = chess.Board()
     enriched: list[dict] = []
@@ -157,6 +182,10 @@ def build_analysis_data(moves: list[dict]) -> dict:
         color = str(raw["color"])
         eval_before = int(raw["eval_before"])
         eval_after = int(raw["eval_after"])
+        raw_second_eval = raw.get("second_eval_cp")
+        second_eval_cp = (
+            int(raw_second_eval) if raw_second_eval is not None else None
+        )
 
         cp_loss = _cp_loss_for_move(color, eval_before, eval_after)
         classification = classify_move(cp_loss)
@@ -212,7 +241,11 @@ def build_analysis_data(moves: list[dict]) -> dict:
                     best_move_obj,
                 )
 
-            entry["is_only_move"] = False
+            entry["is_only_move"] = _is_only_move(
+                color,
+                eval_before,
+                second_eval_cp,
+            )
             entry["best_move_engine"] = best_move_san
             entry["tactical_tags"] = tactical_tags
             entry["fen_before"] = fen_before
