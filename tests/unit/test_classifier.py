@@ -2,7 +2,9 @@ import pytest
 
 from app.services.analysis.classifier import (
     CP_LOSS_CAP,
+    ONLY_MOVE_GAP_CP,
     _cp_loss_for_move,
+    _is_only_move,
     build_analysis_data,
     classify_move,
 )
@@ -73,6 +75,52 @@ def test_cp_loss_floor_still_zero() -> None:
     """The lower clamp survives: an improving (negative) delta stays 0."""
     # Black move where White-relative eval drops (good for Black) → no loss.
     assert _cp_loss_for_move("Black", 30, -30) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("second_eval_cp", "expected"),
+    [
+        (-ONLY_MOVE_GAP_CP, True),
+        (-ONLY_MOVE_GAP_CP + 1, False),
+        (None, False),
+    ],
+)
+def test_only_move_gap_threshold(
+    second_eval_cp: int | None,
+    expected: bool,
+) -> None:
+    """The 200 cp boundary is inclusive; no second PV is not a signal."""
+    assert _is_only_move("White", 0, second_eval_cp) is expected
+
+
+@pytest.mark.unit
+def test_black_perspective_gap() -> None:
+    """For Black, a lower White-relative primary evaluation is better."""
+    assert _is_only_move("Black", -100, 100) is True
+    assert _is_only_move("Black", 100, -100) is False
+
+
+@pytest.mark.unit
+def test_only_move_is_stored_without_second_eval() -> None:
+    """The derived flag is stored on an error, but the raw second PV is not."""
+    raw_moves = [
+        {
+            "ply": 1,
+            "san": "Nf3",
+            "color": "White",
+            "eval_before": 100,
+            "eval_after": 0,
+            "best_move": "e2e4",
+            "second_eval_cp": -100,
+        }
+    ]
+
+    move = build_analysis_data(raw_moves)["moves"][0]
+
+    assert move["classification"] == "inaccuracy"
+    assert move["is_only_move"] is True
+    assert "second_eval_cp" not in move
 
 
 @pytest.mark.unit
