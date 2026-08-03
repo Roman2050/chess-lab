@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_db
 from app.schemas.analysis import AnalysisProgress, BatchAnalysisResponse
+from app.security import require_mvp_api_key
 from app.services.analysis_queue import (
     get_analysis_progress,
     get_unanalyzed_game_ids,
@@ -14,7 +15,11 @@ from app.tasks.celery_app import analyze_game
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
 
-@router.post("/player/{username}", response_model=BatchAnalysisResponse)
+@router.post(
+    "/player/{username}",
+    response_model=BatchAnalysisResponse,
+    dependencies=[Depends(require_mvp_api_key)],
+)
 async def enqueue_player_analysis(
     username: str,
     db: AsyncSession = Depends(get_async_db),

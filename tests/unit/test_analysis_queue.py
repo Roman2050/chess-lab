@@ -29,9 +29,13 @@ def override_db(app):
 
 
 @pytest.fixture
-async def api_client(app, override_db):
+async def api_client(app, override_db, auth_headers):
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers=auth_headers,
+    ) as client:
         yield client
 
 

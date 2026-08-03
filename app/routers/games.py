@@ -1,43 +1,48 @@
 import asyncio
+
 import httpx
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
-from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_db
-from app.models.enums import StandardPerfType
 from app.models.db import Game
-from app.schemas.games import UploadResponse, PaginatedGames, SortOrder, GameDetail
+from app.models.enums import StandardPerfType
+from app.schemas.games import GameDetail, PaginatedGames, SortOrder, UploadResponse
 from app.schemas.stats import (
-    PlayerStats,
-    OpeningStat,
     MoveAccuracyStat,
+    OpeningStat,
+    PlayerStats,
 )
-from app.services.lichess import fetch_games_from_lichess
-from app.utils.parser import parse_pgn_text
-from app.services.db_manager import bulk_save_games
-from app.services.game_queries import get_filtered_games
-from app.services.aggregation.helpers import get_player_analyzed_games
-from app.services.aggregation.acpl import compute_player_acpl
 from app.services.aggregation.accuracy import (
     compute_accuracy_by_phase,
     get_accuracy_by_move_number,
 )
-from app.services.aggregation.openings import get_opening_stats
+from app.services.aggregation.acpl import compute_player_acpl
 from app.services.aggregation.errors import compute_error_patterns
+from app.services.aggregation.helpers import get_player_analyzed_games
+from app.services.aggregation.openings import get_opening_stats
+from app.services.db_manager import bulk_save_games
+from app.services.game_queries import get_filtered_games
+from app.services.lichess import fetch_games_from_lichess
+from app.security import require_mvp_api_key
 from app.tasks.celery_app import analyze_game
+from app.utils.parser import parse_pgn_text
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 router = APIRouter(prefix="/games", tags=["Games Integration"])
 
-@router.post("/lichess/{username}", response_model=UploadResponse)
+@router.post(
+    "/lichess/{username}",
+    response_model=UploadResponse,
+    dependencies=[Depends(require_mvp_api_key)],
+)
 async def load_from_lichess(
     username: str, 
     max_games: int = Query(50, ge=1, le=50, description="Number of games to upload (max 50)"), 
-    perf_type: Optional[StandardPerfType] = None,
+    perf_type: StandardPerfType | None = None,
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -66,7 +71,11 @@ async def load_from_lichess(
     )
 
 
-@router.post("/upload", response_model=UploadResponse)
+@router.post(
+    "/upload",
+    response_model=UploadResponse,
+    dependencies=[Depends(require_mvp_api_key)],
+)
 async def upload_pgn_file(
     file: UploadFile = File(...), 
     db: AsyncSession = Depends(get_async_db)
@@ -149,7 +158,10 @@ async def get_game_by_id(
     return game
 
 
-@router.post("/{game_id}/analyze")
+@router.post(
+    "/{game_id}/analyze",
+    dependencies=[Depends(require_mvp_api_key)],
+)
 async def enqueue_game_analysis(
     game_id: int,
     db: AsyncSession = Depends(get_async_db),
