@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     MAX_ANALYSIS_TASKS_PER_REQUEST: int = Field(default=10, ge=1)
     MAX_UPLOAD_GAMES: int = Field(default=100, ge=1)
 
+    # Fixed-window Redis quotas for expensive operator POST requests.
+    MVP_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=3600, ge=1)
+    MVP_LICHESS_IMPORTS_PER_WINDOW: int = Field(default=5, ge=1)
+    MVP_UPLOADS_PER_WINDOW: int = Field(default=10, ge=1)
+    MVP_ANALYSIS_REQUESTS_PER_WINDOW: int = Field(default=20, ge=1)
+    MVP_REPORT_REQUESTS_PER_WINDOW: int = Field(default=5, ge=1)
+
     # Stockfish — path is optional (analysis tasks no-op when missing); the
     # tuning knobs have engine-sane defaults. Ranges are sanity bounds, not
     # Stockfish's hard limits (it accepts much wider values).

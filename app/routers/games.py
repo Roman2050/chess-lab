@@ -26,7 +26,11 @@ from app.services.aggregation.openings import get_opening_stats
 from app.services.db_manager import bulk_save_games
 from app.services.game_queries import get_filtered_games
 from app.services.lichess import fetch_games_from_lichess
-from app.security import require_mvp_api_key
+from app.security import (
+    require_analysis_quota,
+    require_lichess_import_quota,
+    require_pgn_upload_quota,
+)
 from app.tasks.celery_app import analyze_game
 from app.utils.parser import parse_pgn_text
 
@@ -38,7 +42,7 @@ router = APIRouter(prefix="/games", tags=["Games Integration"])
 @router.post(
     "/lichess/{username}",
     response_model=UploadResponse,
-    dependencies=[Depends(require_mvp_api_key)],
+    dependencies=[Depends(require_lichess_import_quota)],
 )
 async def load_from_lichess(
     username: str, 
@@ -75,7 +79,7 @@ async def load_from_lichess(
 @router.post(
     "/upload",
     response_model=UploadResponse,
-    dependencies=[Depends(require_mvp_api_key)],
+    dependencies=[Depends(require_pgn_upload_quota)],
 )
 async def upload_pgn_file(
     file: UploadFile = File(...), 
@@ -167,7 +171,7 @@ async def get_game_by_id(
 
 @router.post(
     "/{game_id}/analyze",
-    dependencies=[Depends(require_mvp_api_key)],
+    dependencies=[Depends(require_analysis_quota)],
 )
 async def enqueue_game_analysis(
     game_id: int,

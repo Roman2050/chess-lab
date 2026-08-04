@@ -1,4 +1,5 @@
 import os
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -15,6 +16,24 @@ os.environ.setdefault("DB_USER", "chess")
 os.environ.setdefault("DB_PASSWORD", "chess")
 os.environ.setdefault("DB_NAME", "chess_lab")
 os.environ["MVP_API_KEY"] = TEST_MVP_API_KEY
+
+
+@pytest.fixture(autouse=True)
+def allow_rate_limits(monkeypatch):
+    """Keep unrelated tests isolated from the external Redis backend."""
+    import app.security as security
+    from app.services.rate_limit import RateLimitResult
+
+    consume = AsyncMock(
+        return_value=RateLimitResult(
+            allowed=True,
+            limit=100,
+            remaining=99,
+            retry_after=60,
+        )
+    )
+    monkeypatch.setattr(security, "consume_operation_quota", consume)
+    return consume
 
 
 @pytest.fixture(scope="session")

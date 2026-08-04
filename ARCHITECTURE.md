@@ -126,6 +126,17 @@ most `MAX_UPLOAD_GAMES` parsed games (default 100). Report endpoints accept only
 case-sensitive languages parsed once from `REPORT_ALLOWED_LANGUAGES`; the default
 `REPORT_LANGUAGE` must belong to that allowlist or application configuration fails.
 
+**3.11 Redis Quotas for Expensive POST Operations (Phase 7A)**
+Every authenticated expensive POST consumes an operation-specific fixed-window
+quota in Redis before parsing, service calls, or Celery enqueue. The operation names
+are `lichess_import`, `pgn_upload`, `analysis`, and `report`; single-game and batch
+analysis deliberately share the `analysis` budget. Counters use the key
+`mvp-rate:{sha256(api_key)[:16]}:{operation}:{window_bucket}`, so the raw operator
+key is never stored. A Lua script performs `INCR` and first-write `EXPIRE` atomically.
+An exhausted budget returns 429 with `Retry-After` until the next window, while a
+Redis failure fails closed with 503. `/health` remains a liveness endpoint and
+`/ready` reports Redis availability.
+
 ---
 
 ## 4. Project File Structure
@@ -152,6 +163,7 @@ chess-lab/
 │   │   ├── analysis.py        # Batch analysis enqueue + progress
 │   │   └── report.py          # [PLANNED Phase 5] LLM report POST/GET/status
 │   ├── services/
+│   │   ├── rate_limit.py      # Atomic Redis fixed-window quotas for expensive POST
 │   │   ├── lichess.py         # fetch_games_from_lichess() → raw PGN text
 │   │   ├── db_manager.py      # bulk_save_games() with on_conflict_do_nothing
 │   │   ├── game_queries.py    # get_filtered_games(): filters + pagination,
@@ -361,6 +373,7 @@ read-side from them — no extra fields and no schema change are required.
 | `POST` | `/analyze/player/{username}` | Enqueue up to `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable games, ordered by id |
 | `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
+| `GET` | `/ready` | Readiness check; 503 when Redis quota enforcement is unavailable |
 
 Every endpoint parameter that identifies a player is case-insensitive on the
 database read side (§3.9); response shapes and the requested display spelling are
@@ -581,6 +594,13 @@ REDIS_URL=redis://localhost:6379/0
 # Per-request operation budgets (Phase 7A)
 MAX_ANALYSIS_TASKS_PER_REQUEST=10
 MAX_UPLOAD_GAMES=100
+
+# Fixed-window Redis quotas for expensive POST operations (Phase 7A)
+MVP_RATE_LIMIT_WINDOW_SECONDS=3600
+MVP_LICHESS_IMPORTS_PER_WINDOW=5
+MVP_UPLOADS_PER_WINDOW=10
+MVP_ANALYSIS_REQUESTS_PER_WINDOW=20  # shared by single-game and batch analysis
+MVP_REPORT_REQUESTS_PER_WINDOW=5
 
 # Stockfish — only STOCKFISH_PATH is required; the rest fall back to safe
 # defaults defined in app/config.py.
