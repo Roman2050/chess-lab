@@ -157,6 +157,21 @@ subclasses. The router maps them to short 404/429/502/503 responses and never re
 the upstream body, request headers, query, or original exception text. There is no
 automatic retry, sleep, `Retry-After` parsing, or Redis coordination in Chat 1.
 
+**3.13 Lichess Distributed Single-Flight and Cooldown (Phase 7B, Chat 2)**
+Every Lichess export passes through a deployment-wide Redis gate. A token-owned lock
+at `chess-lab:lichess:request-lock` is acquired with `SET NX PX`; its TTL is the hard
+Lichess total timeout plus a 15-second safety margin. A busy lock fails immediately
+with 409. Release uses a compare-and-delete Lua script, so an expired owner can never
+delete a newer request's lock.
+
+The gate checks `chess-lab:lichess:cooldown` both before and after acquiring the lock.
+An upstream 429 is converted into a cooldown bounded by
+`LICHESS_MIN_COOLDOWN_SECONDS..LICHESS_MAX_COOLDOWN_SECONDS`, stored before the lock
+is released, and returned as `Retry-After`. Active cooldowns return local 429 responses
+without an outbound request. Redis failures and malformed persistent cooldown state
+fail closed with a generic 503. Request handlers never wait for the lock, retry, or
+sleep.
+
 ---
 
 ## 4. Project File Structure
@@ -185,6 +200,8 @@ chess-lab/
 │   ├── services/
 │   │   ├── rate_limit.py      # Atomic Redis fixed-window quotas for expensive POST
 │   │   ├── lichess.py         # identified, timeout/size-bounded Lichess PGN client
+│   │   ├── lichess_errors.py  # Plain service/gate exception hierarchy
+│   │   ├── lichess_gate.py    # Redis single-flight lock + global 429 cooldown
 │   │   ├── db_manager.py      # bulk_save_games() with on_conflict_do_nothing
 │   │   ├── game_queries.py    # get_filtered_games(): filters + pagination,
 │   │   │                      #   summary columns only (§3.7)
@@ -611,10 +628,12 @@ DB_PASSWORD=chess
 DB_NAME=chess_lab
 REDIS_URL=redis://localhost:6379/0
 
-# Lichess client (Phase 7B Chat 1)
+# Lichess client and distributed gate (Phase 7B)
 LICHESS_USER_AGENT=ChessLab/0.1 (+https://your-real-contact.example)  # required
 LICHESS_API_TOKEN=                      # optional server-side secret
 LICHESS_TOTAL_TIMEOUT_SECONDS=30
+LICHESS_MIN_COOLDOWN_SECONDS=60
+LICHESS_MAX_COOLDOWN_SECONDS=3600
 LICHESS_MAX_RESPONSE_BYTES=5242880      # 5 MiB hard response-body limit
 
 # Per-request operation budgets (Phase 7A)
