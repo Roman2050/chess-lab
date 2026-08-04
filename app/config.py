@@ -1,5 +1,13 @@
-from pydantic import Field, SecretStr, computed_field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, Self
+
+from pydantic import (
+    Field,
+    SecretStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
 
@@ -14,6 +22,10 @@ class Settings(BaseSettings):
     # Required for every mutating or expensive API operation. There is no
     # development fallback: missing configuration must fail at import/startup.
     MVP_API_KEY: SecretStr = Field(min_length=32, repr=False)
+
+    # Per-request operation budgets for the single-operator MVP.
+    MAX_ANALYSIS_TASKS_PER_REQUEST: int = Field(default=10, ge=1)
+    MAX_UPLOAD_GAMES: int = Field(default=100, ge=1)
 
     # Stockfish — path is optional (analysis tasks no-op when missing); the
     # tuning knobs have engine-sane defaults. Ranges are sanity bounds, not
@@ -32,6 +44,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = Field(default=0.4, ge=0.0, le=2.0)
     LLM_TIMEOUT: int = Field(default=120, ge=1, le=600)
     REPORT_LANGUAGE: str = "en"
+    REPORT_ALLOWED_LANGUAGES: Annotated[tuple[str, ...], NoDecode] = ("en", "uk")
     REPORT_REFRESH_THRESHOLD: int = Field(default=20, ge=1)
 
     # How long a report may stay `generating` before another request is allowed
@@ -45,6 +58,35 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         hide_input_in_errors=True,
     )
+
+    @field_validator("REPORT_ALLOWED_LANGUAGES", mode="before")
+    @classmethod
+    def parse_report_allowed_languages(cls, value: object) -> tuple[str, ...]:
+        """Parse the comma-separated report-language allowlist once."""
+        raw_items: object
+        if isinstance(value, str):
+            raw_items = value.split(",")
+        else:
+            raw_items = value
+
+        if not isinstance(raw_items, (list, tuple, set, frozenset)):
+            raise ValueError("REPORT_ALLOWED_LANGUAGES must be comma-separated")
+        if not all(isinstance(item, str) for item in raw_items):
+            raise ValueError("REPORT_ALLOWED_LANGUAGES must contain strings")
+
+        languages = tuple(item.strip() for item in raw_items)
+        if not languages or any(not language for language in languages):
+            raise ValueError("REPORT_ALLOWED_LANGUAGES must not contain empty items")
+        return languages
+
+    @model_validator(mode="after")
+    def validate_default_report_language(self) -> Self:
+        """Ensure the default report language is allowed."""
+        if self.REPORT_LANGUAGE not in self.REPORT_ALLOWED_LANGUAGES:
+            raise ValueError(
+                "REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES"
+            )
+        return self
 
     @computed_field
     @property
