@@ -5,6 +5,7 @@ from app.database import get_async_db
 from app.services.lichess import (
     LichessBusyError,
     LichessConfigurationError,
+    LichessCoordinationError,
     LichessProtocolError,
     LichessRateLimitedError,
     LichessUnavailableError,
@@ -44,7 +45,7 @@ async def api_client(app, override_db, auth_headers):
             "Lichess import is already in progress",
         ),
         (
-            LichessRateLimitedError(retry_after=None),
+            LichessRateLimitedError(retry_after=73),
             429,
             "Lichess rate limit is active, retry later",
         ),
@@ -55,6 +56,11 @@ async def api_client(app, override_db, auth_headers):
         ),
         (
             LichessConfigurationError("Authorization: Bearer secret-token"),
+            503,
+            "Lichess integration is unavailable",
+        ),
+        (
+            LichessCoordinationError("redis://secret-host/0"),
             503,
             "Lichess integration is unavailable",
         ),
@@ -94,19 +100,20 @@ async def test_lichess_route_maps_service_errors_without_leaking_upstream(
     assert resp.json() == {"detail": detail}
     assert "<html>" not in resp.text
     assert "secret-token" not in resp.text
+    assert "secret-host" not in resp.text
     assert "network exception details" not in resp.text
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_lichess_route_429_does_not_require_retry_after_in_chat_one(
+async def test_lichess_route_429_includes_bounded_retry_after(
     api_client,
     monkeypatch,
 ):
     import app.routers.games as games_router
 
     async def fake_fetch(*_args, **_kwargs):
-        raise LichessRateLimitedError(retry_after=None)
+        raise LichessRateLimitedError(retry_after=73)
 
     def should_not_be_called(*_args, **_kwargs):
         raise AssertionError("parse/bulk should not be called on fetch error")
@@ -120,7 +127,7 @@ async def test_lichess_route_429_does_not_require_retry_after_in_chat_one(
     assert resp.json() == {
         "detail": "Lichess rate limit is active, retry later"
     }
-    assert "Retry-After" not in resp.headers
+    assert resp.headers["Retry-After"] == "73"
 
 
 @pytest.mark.unit
