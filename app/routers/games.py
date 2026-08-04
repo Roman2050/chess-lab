@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_async_db
 from app.models.db import Game
 from app.models.enums import StandardPerfType
@@ -109,6 +110,12 @@ async def upload_pgn_file(
         raise HTTPException(status_code=400, detail="File encoding error. UTF-8 is expected.")
 
     parsed_games = await asyncio.to_thread(parse_pgn_text, raw_pgn)
+
+    if len(parsed_games) > settings.MAX_UPLOAD_GAMES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PGN file exceeds the limit of {settings.MAX_UPLOAD_GAMES} games",
+        )
 
     if not parsed_games:
         return UploadResponse(

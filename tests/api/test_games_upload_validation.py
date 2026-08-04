@@ -127,6 +127,52 @@ async def test_upload_happy_path_uses_parser_and_bulk_save(api_client, monkeypat
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_upload_rejects_more_than_game_limit_before_db_write(
+    api_client,
+    monkeypatch,
+):
+    import app.routers.games as games_router
+
+    parsed_games = [{"unique_id": str(index)} for index in range(3)]
+
+    async def should_not_be_called(*args, **kwargs):
+        raise AssertionError("bulk_save_games should not be called over the game limit")
+
+    monkeypatch.setattr(games_router.settings, "MAX_UPLOAD_GAMES", 2)
+    monkeypatch.setattr(games_router, "parse_pgn_text", lambda _raw_pgn: parsed_games)
+    monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
+
+    files = {"file": ("games.pgn", b"utf-8 pgn content", "application/octet-stream")}
+    resp = await api_client.post("/games/upload", files=files)
+
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == "PGN file exceeds the limit of 2 games"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upload_accepts_exact_game_limit(api_client, monkeypatch):
+    import app.routers.games as games_router
+
+    parsed_games = [{"unique_id": str(index)} for index in range(2)]
+
+    async def fake_bulk_save(_db, games_data):
+        assert games_data is parsed_games
+        return {"saved_new": 2, "total_processed": 2}
+
+    monkeypatch.setattr(games_router.settings, "MAX_UPLOAD_GAMES", 2)
+    monkeypatch.setattr(games_router, "parse_pgn_text", lambda _raw_pgn: parsed_games)
+    monkeypatch.setattr(games_router, "bulk_save_games", fake_bulk_save)
+
+    files = {"file": ("games.pgn", b"utf-8 pgn content", "application/octet-stream")}
+    resp = await api_client.post("/games/upload", files=files)
+
+    assert resp.status_code == 200
+    assert resp.json()["stats"] == {"saved_new": 2, "total_processed": 2}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_upload_too_large_413(api_client, monkeypatch):
     import app.routers.games as games_router
 
