@@ -102,6 +102,10 @@ longer costs the whole file. Uploads are bounded before the body is buffered —
 `MAX_UPLOAD_BYTES` (20 MB) is a 413, a missing filename / wrong extension / non-UTF-8
 payload is a 400.
 
+Manual PGN uploads have a second per-request bound after parsing:
+`MAX_UPLOAD_GAMES` (default 100). Exceeding it returns 413 before the bulk insert;
+the parser and `unique_id` contracts remain unchanged.
+
 **3.9 Case-Insensitive Player Identity (Phase 7)**
 Every database lookup by player name compares `lower(stored_player_name)` with
 `lower(requested_player_name)`. Functional indexes on `lower(white_player)` and
@@ -113,6 +117,14 @@ For reports, the logical cache key and atomic generation-claim target are
 first inserted `PlayerReport.player_name` casing is retained as its display value:
 later requests with different casing find and update the same row without rewriting
 that field.
+
+**3.10 Per-Request Operation Budgets (Phase 7A)**
+One batch-analysis request selects only the first
+`MAX_ANALYSIS_TASKS_PER_REQUEST` claimable game ids (default 10), ordered by
+`Game.id`, and enqueues at most that many tasks. A manual PGN upload may persist at
+most `MAX_UPLOAD_GAMES` parsed games (default 100). Report endpoints accept only the
+case-sensitive languages parsed once from `REPORT_ALLOWED_LANGUAGES`; the default
+`REPORT_LANGUAGE` must belong to that allowlist or application configuration fails.
 
 ---
 
@@ -339,14 +351,14 @@ read-side from them — no extra fields and no schema change are required.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/games/lichess/{username}` | Fetch games from Lichess API, parse, save |
-| `POST` | `/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
+| `POST` | `/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB or `MAX_UPLOAD_GAMES`, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
 | `GET` | `/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
 | `GET` | `/games/{game_id}` | Full game detail including pgn_content |
 | `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
 | `GET` | `/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
 | `GET` | `/games/stats/{player_name}/openings` | Per-opening statistics (win-rate + ACPL + live-position `wp_loss_in_opening`) |
 | `GET` | `/games/stats/{player_name}/moves` | Accuracy by move number (`avg_cp_loss` + live-position `avg_wp_loss`) |
-| `POST` | `/analyze/player/{username}` | Enqueue batch analysis for all unanalyzed games of a player |
+| `POST` | `/analyze/player/{username}` | Enqueue up to `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable games, ordered by id |
 | `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
 
@@ -362,9 +374,10 @@ unchanged.
 | `GET` | `/report/{username}` | Return the cached report text (404 if none yet); flags `is_stale` |
 | `GET` | `/report/{username}/status` | Generation state: none / generating / ready / failed |
 
-All three accept `?language=` (default `REPORT_LANGUAGE`, currently `en`). The report
-is a one-shot generated text (not a chat): `POST` triggers a background Celery task,
-`GET` reads the cached result. See Section 7.1.
+All three accept `?language=` (default `REPORT_LANGUAGE`, currently `en`) and reject
+values outside the case-sensitive `REPORT_ALLOWED_LANGUAGES` allowlist with 422. The
+report is a one-shot generated text (not a chat): `POST` triggers a background Celery
+task, `GET` reads the cached result. See Section 7.1.
  
 ---
 
@@ -565,6 +578,10 @@ DB_PASSWORD=chess
 DB_NAME=chess_lab
 REDIS_URL=redis://localhost:6379/0
 
+# Per-request operation budgets (Phase 7A)
+MAX_ANALYSIS_TASKS_PER_REQUEST=10
+MAX_UPLOAD_GAMES=100
+
 # Stockfish — only STOCKFISH_PATH is required; the rest fall back to safe
 # defaults defined in app/config.py.
 STOCKFISH_PATH=/usr/local/bin/stockfish
@@ -589,6 +606,7 @@ LLM_TEMPERATURE=0.4                      # 0.0..2.0
 LLM_TIMEOUT=120                          # seconds per generation (1..600)
 
 REPORT_LANGUAGE=en                       # default report language
+REPORT_ALLOWED_LANGUAGES=en,uk           # case-sensitive comma-separated allowlist
 REPORT_REFRESH_THRESHOLD=20              # new analyzed games needed to regenerate
 REPORT_GENERATION_LEASE_SECONDS=900      # when a stuck `generating` may be reclaimed
 ```
