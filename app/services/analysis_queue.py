@@ -4,7 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import ANALYSIS_STATUS_CLAIMABLE, Game
 
 
-async def get_unanalyzed_game_ids(db: AsyncSession, player_name: str) -> list[int]:
+async def get_unanalyzed_game_ids(
+    db: AsyncSession,
+    player_name: str,
+    limit: int,
+) -> list[int]:
     """Return ids of the player's games a worker could still pick up.
 
     Filters on `analysis_status`, not `is_analyzed`: games currently being
@@ -15,12 +19,17 @@ async def get_unanalyzed_game_ids(db: AsyncSession, player_name: str) -> list[in
     out one-per-Celery-task, so the heavy `pgn_content`/`analysis_data` columns
     must not be loaded here.
     """
-    stmt = select(Game.id).where(
-        or_(
-            func.lower(Game.white_player) == func.lower(player_name),
-            func.lower(Game.black_player) == func.lower(player_name),
-        ),
-        Game.analysis_status.in_(ANALYSIS_STATUS_CLAIMABLE),
+    stmt = (
+        select(Game.id)
+        .where(
+            or_(
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
+            ),
+            Game.analysis_status.in_(ANALYSIS_STATUS_CLAIMABLE),
+        )
+        .order_by(Game.id)
+        .limit(limit)
     )
 
     result = await db.execute(stmt)
