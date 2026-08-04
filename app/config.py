@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     LICHESS_USER_AGENT: str
     LICHESS_API_TOKEN: SecretStr | None = None
     LICHESS_TOTAL_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0)
+    LICHESS_MIN_COOLDOWN_SECONDS: int = Field(default=60, ge=1)
+    LICHESS_MAX_COOLDOWN_SECONDS: int = Field(default=3600, ge=1)
     LICHESS_MAX_RESPONSE_BYTES: int = Field(default=5 * 1024 * 1024, ge=1)
 
     # Stockfish — path is optional (analysis tasks no-op when missing); the
@@ -133,8 +135,13 @@ class Settings(BaseSettings):
         return languages
 
     @model_validator(mode="after")
-    def validate_default_report_language(self) -> Self:
-        """Ensure the default report language is allowed."""
+    def validate_dependent_settings(self) -> Self:
+        """Validate settings that depend on another setting."""
+        if self.LICHESS_MIN_COOLDOWN_SECONDS > self.LICHESS_MAX_COOLDOWN_SECONDS:
+            raise ValueError(
+                "LICHESS_MIN_COOLDOWN_SECONDS must not exceed "
+                "LICHESS_MAX_COOLDOWN_SECONDS"
+            )
         if self.REPORT_LANGUAGE not in self.REPORT_ALLOWED_LANGUAGES:
             raise ValueError(
                 "REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES"
