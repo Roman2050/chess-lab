@@ -11,7 +11,7 @@ from app.schemas.report import (
     ReportResponse,
     ReportStatusResponse,
 )
-from app.security import require_mvp_api_key
+from app.security import require_report_quota
 from app.services.report import ReportAction, decide_report_action
 from app.services.report_repository import (
     count_analyzed_games,
@@ -42,7 +42,7 @@ def require_allowed_report_language(
 @router.post(
     "/{username}",
     response_model=ReportRequestResponse,
-    dependencies=[Depends(require_mvp_api_key)],
+    dependencies=[Depends(require_report_quota)],
 )
 async def request_report(
     username: str,

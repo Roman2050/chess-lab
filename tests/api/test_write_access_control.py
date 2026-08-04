@@ -1,10 +1,11 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import httpx
 import pytest
 
 from app.database import get_async_db
+from app.services.rate_limit import RateLimitOperation
 
 
 PROTECTED_POSTS = [
@@ -88,6 +89,7 @@ async def _post(
 @pytest.mark.parametrize(("path", "upload"), PROTECTED_POSTS)
 async def test_protected_post_rejects_missing_and_invalid_key_before_business_logic(
     access_client,
+    allow_rate_limits,
     blocked_collaborators,
     caplog,
     path,
@@ -111,6 +113,7 @@ async def test_protected_post_rejects_missing_and_invalid_key_before_business_lo
     assert INVALID_API_KEY not in caplog.text
     for collaborator in blocked_collaborators:
         collaborator.assert_not_called()
+    allow_rate_limits.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -118,6 +121,7 @@ async def test_protected_post_rejects_missing_and_invalid_key_before_business_lo
 async def test_valid_key_reaches_each_existing_post_handler(
     access_client,
     auth_headers,
+    allow_rate_limits,
     monkeypatch,
 ):
     import app.routers.analysis as analysis_router
@@ -162,6 +166,13 @@ async def test_valid_key_reaches_each_existing_post_handler(
     game_ids.assert_awaited_once()
     assert [call.args for call in delay.call_args_list] == [(1,), (2,)]
     report_count.assert_awaited_once()
+    assert allow_rate_limits.await_args_list == [
+        call(RateLimitOperation.LICHESS_IMPORT),
+        call(RateLimitOperation.PGN_UPLOAD),
+        call(RateLimitOperation.ANALYSIS),
+        call(RateLimitOperation.ANALYSIS),
+        call(RateLimitOperation.REPORT),
+    ]
 
 
 @pytest.mark.unit

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_async_db
 from app.schemas.analysis import AnalysisProgress, BatchAnalysisResponse
-from app.security import require_mvp_api_key
+from app.security import require_analysis_quota
 from app.services.analysis_queue import (
     get_analysis_progress,
     get_unanalyzed_game_ids,
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/analyze", tags=["Analysis"])
 @router.post(
     "/player/{username}",
     response_model=BatchAnalysisResponse,
-    dependencies=[Depends(require_mvp_api_key)],
+    dependencies=[Depends(require_analysis_quota)],
 )
 async def enqueue_player_analysis(
     username: str,
