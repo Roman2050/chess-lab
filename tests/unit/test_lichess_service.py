@@ -8,12 +8,18 @@ from pydantic import SecretStr
 from app.config import settings
 from app.models.enums import StandardPerfType
 from app.services.lichess import (
+    LichessBusyError,
     LichessConfigurationError,
+    LichessCoordinationError,
     LichessProtocolError,
     LichessRateLimitedError,
     LichessUnavailableError,
     LichessUserNotFoundError,
     fetch_games_from_lichess,
+)
+from app.services.lichess_gate import (
+    LICHESS_COOLDOWN_KEY,
+    LICHESS_REQUEST_LOCK_KEY,
 )
 
 
@@ -41,6 +47,72 @@ class CountingStream(httpx.AsyncByteStream):
                 await asyncio.sleep(self.delay)
             self.chunks_yielded += 1
             yield chunk
+
+
+class BlockingStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __aiter__(self):
+        self.entered.set()
+        await self.release.wait()
+        yield PGN_TEXT.encode()
+
+
+class GateRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.ttls_ms: dict[str, int] = {}
+        self.events: list[tuple[object, ...]] = []
+
+    async def set(
+        self,
+        name: str,
+        value: str,
+        *,
+        ex: int | None = None,
+        px: int | None = None,
+        nx: bool = False,
+    ) -> bool | None:
+        self.events.append(("set", name, value, ex, px, nx))
+        if nx and name in self.values:
+            return None
+        self.values[name] = value
+        if ex is not None:
+            self.ttls_ms[name] = ex * 1000
+        elif px is not None:
+            self.ttls_ms[name] = px
+        return True
+
+    async def pttl(self, name: str) -> int:
+        self.events.append(("pttl", name))
+        if name not in self.values:
+            return -2
+        return self.ttls_ms.get(name, -1)
+
+    async def eval(
+        self,
+        _script: str,
+        _numkeys: int,
+        key: str,
+        owner_token: str,
+    ) -> int:
+        self.events.append(("eval", key, owner_token))
+        if self.values.get(key) != owner_token:
+            return 0
+        del self.values[key]
+        self.ttls_ms.pop(key, None)
+        return 1
+
+
+@pytest.fixture(autouse=True)
+def isolated_lichess_gate(monkeypatch) -> GateRedis:
+    import app.services.lichess_gate as gate_module
+
+    redis = GateRedis()
+    monkeypatch.setattr(gate_module, "_get_redis_client", lambda: redis)
+    return redis
 
 
 @pytest.mark.unit
@@ -367,7 +439,9 @@ async def test_upstream_status_maps_to_plain_service_error(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upstream_429_has_no_retry_after_in_chat_one() -> None:
+async def test_upstream_429_sets_bounded_cooldown_before_lock_release(
+    isolated_lichess_gate: GateRedis,
+) -> None:
     with respx.mock(assert_all_called=True) as router:
         router.get(URL).mock(
             return_value=httpx.Response(
@@ -380,12 +454,97 @@ async def test_upstream_429_has_no_retry_after_in_chat_one() -> None:
         with pytest.raises(LichessRateLimitedError) as exc_info:
             await fetch_games_from_lichess(USERNAME)
 
-    assert exc_info.value.retry_after is None
+    assert exc_info.value.retry_after == 123
+    assert isolated_lichess_gate.ttls_ms[LICHESS_COOLDOWN_KEY] == 123_000
+    cooldown_index = next(
+        index
+        for index, event in enumerate(isolated_lichess_gate.events)
+        if event[0] == "set" and event[1] == LICHESS_COOLDOWN_KEY
+    )
+    release_index = next(
+        index
+        for index, event in enumerate(isolated_lichess_gate.events)
+        if event[0] == "eval"
+    )
+    assert cooldown_index < release_index
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_total_timeout_covers_response_body_read(monkeypatch) -> None:
+async def test_request_during_cooldown_makes_no_upstream_call(
+    isolated_lichess_gate: GateRedis,
+) -> None:
+    isolated_lichess_gate.values[LICHESS_COOLDOWN_KEY] = "1"
+    isolated_lichess_gate.ttls_ms[LICHESS_COOLDOWN_KEY] = 42_001
+
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(URL).mock(
+            return_value=httpx.Response(200, text=PGN_TEXT)
+        )
+
+        with pytest.raises(LichessRateLimitedError) as exc_info:
+            await fetch_games_from_lichess(USERNAME)
+
+    assert exc_info.value.retry_after == 43
+    assert route.call_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_parallel_fetch_is_busy_and_makes_only_one_upstream_call() -> None:
+    stream = BlockingStream()
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": "text/plain"},
+        stream=stream,
+    )
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(URL).mock(return_value=response)
+        first = asyncio.create_task(fetch_games_from_lichess(USERNAME))
+        await stream.entered.wait()
+
+        with pytest.raises(LichessBusyError):
+            await fetch_games_from_lichess(USERNAME)
+
+        stream.release.set()
+        assert await first == PGN_TEXT
+
+    assert route.call_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_redis_unavailable_makes_no_upstream_call(monkeypatch) -> None:
+    import app.services.lichess_gate as gate_module
+
+    class UnavailableRedis(GateRedis):
+        async def pttl(self, name: str) -> int:
+            raise ConnectionError(f"Redis unavailable for {name}")
+
+    monkeypatch.setattr(
+        gate_module,
+        "_get_redis_client",
+        lambda: UnavailableRedis(),
+    )
+
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(URL).mock(
+            return_value=httpx.Response(200, text=PGN_TEXT)
+        )
+
+        with pytest.raises(LichessCoordinationError):
+            await fetch_games_from_lichess(USERNAME)
+
+    assert route.call_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_total_timeout_covers_response_body_read(
+    monkeypatch,
+    isolated_lichess_gate: GateRedis,
+) -> None:
     monkeypatch.setattr(settings, "LICHESS_TOTAL_TIMEOUT_SECONDS", 0.001)
     response = httpx.Response(
         200,
@@ -397,3 +556,5 @@ async def test_total_timeout_covers_response_body_read(monkeypatch) -> None:
         router.get(URL).mock(return_value=response)
         with pytest.raises(LichessUnavailableError):
             await fetch_games_from_lichess(USERNAME)
+
+    assert LICHESS_REQUEST_LOCK_KEY not in isolated_lichess_gate.values

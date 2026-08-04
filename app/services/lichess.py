@@ -6,6 +6,17 @@ import httpx
 
 from app.config import settings
 from app.models.enums import StandardPerfType
+from app.services.lichess_errors import (
+    LichessBusyError,
+    LichessConfigurationError,
+    LichessCoordinationError,
+    LichessError,
+    LichessProtocolError,
+    LichessRateLimitedError,
+    LichessUnavailableError,
+    LichessUserNotFoundError,
+)
+from app.services.lichess_gate import lichess_request_gate
 
 
 LICHESS_GAMES_URL = "https://lichess.org/api/games/user"
@@ -14,42 +25,6 @@ PGN_TAG_PAIR_PATTERN = re.compile(
     r'^\[[A-Za-z0-9_]+\s+"(?:[^"\\]|\\.)*"\]\s*$'
 )
 RESPONSE_CHUNK_BYTES = 64 * 1024
-
-
-class LichessError(Exception):
-    """Base error for failures handled by the Lichess API boundary."""
-
-
-class LichessConfigurationError(LichessError):
-    """The server-side Lichess integration is misconfigured or unauthorized."""
-
-
-class LichessBusyError(LichessError):
-    """Another deployment-wide Lichess import is already active."""
-
-    def __init__(self, retry_after: int | None = None) -> None:
-        super().__init__("Lichess import is already in progress")
-        self.retry_after = retry_after
-
-
-class LichessRateLimitedError(LichessError):
-    """Lichess has rate-limited the integration."""
-
-    def __init__(self, retry_after: int | None = None) -> None:
-        super().__init__("Lichess rate limit is active")
-        self.retry_after = retry_after
-
-
-class LichessUserNotFoundError(LichessError):
-    """The requested Lichess account does not exist."""
-
-
-class LichessUnavailableError(LichessError):
-    """Lichess could not be reached or is temporarily unavailable."""
-
-
-class LichessProtocolError(LichessError):
-    """Lichess returned a response outside the supported contract."""
 
 
 def _request_headers() -> dict[str, str]:
@@ -74,8 +49,6 @@ def _raise_for_status(status_code: int) -> None:
             raise LichessUserNotFoundError
         case 408:
             raise LichessUnavailableError
-        case 429:
-            raise LichessRateLimitedError(retry_after=None)
         case code if 500 <= code <= 599:
             raise LichessUnavailableError
         case _:
@@ -160,24 +133,37 @@ async def fetch_games_from_lichess(
     }
 
     try:
-        async with asyncio.timeout(settings.LICHESS_TOTAL_TIMEOUT_SECONDS):
-            async with httpx.AsyncClient(follow_redirects=False) as client:
-                async with client.stream(
-                    "GET",
-                    url,
-                    params=params,
-                    headers=_request_headers(),
-                ) as response:
-                    _raise_for_status(response.status_code)
-                    _validate_content_length(
-                        response,
-                        settings.LICHESS_MAX_RESPONSE_BYTES,
-                    )
-                    body = await _read_bounded_body(
-                        response,
-                        settings.LICHESS_MAX_RESPONSE_BYTES,
-                    )
-                    return _decode_and_validate_pgn(body, _media_type(response))
+        async with lichess_request_gate() as gate:
+            upstream_retry_after: str | None = None
+            async with asyncio.timeout(settings.LICHESS_TOTAL_TIMEOUT_SECONDS):
+                async with httpx.AsyncClient(follow_redirects=False) as client:
+                    async with client.stream(
+                        "GET",
+                        url,
+                        params=params,
+                        headers=_request_headers(),
+                    ) as response:
+                        if response.status_code == 429:
+                            upstream_retry_after = response.headers.get(
+                                "Retry-After"
+                            )
+                        else:
+                            _raise_for_status(response.status_code)
+                            _validate_content_length(
+                                response,
+                                settings.LICHESS_MAX_RESPONSE_BYTES,
+                            )
+                            body = await _read_bounded_body(
+                                response,
+                                settings.LICHESS_MAX_RESPONSE_BYTES,
+                            )
+                            return _decode_and_validate_pgn(
+                                body,
+                                _media_type(response),
+                            )
+
+            retry_after = await gate.activate_cooldown(upstream_retry_after)
+            raise LichessRateLimitedError(retry_after=retry_after)
     except LichessError:
         raise
     except httpx.DecodingError:

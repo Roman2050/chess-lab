@@ -27,6 +27,7 @@ from app.services.game_queries import get_filtered_games
 from app.services.lichess import (
     LichessBusyError,
     LichessConfigurationError,
+    LichessCoordinationError,
     LichessProtocolError,
     LichessRateLimitedError,
     LichessUnavailableError,
@@ -83,7 +84,7 @@ async def load_from_lichess(
             status_code=404,
             detail="Lichess user not found",
         ) from None
-    except LichessConfigurationError:
+    except (LichessConfigurationError, LichessCoordinationError):
         raise HTTPException(
             status_code=503,
             detail="Lichess integration is unavailable",

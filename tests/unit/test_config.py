@@ -179,6 +179,8 @@ def test_lichess_api_token_has_secret_representation() -> None:
         "MVP_ANALYSIS_REQUESTS_PER_WINDOW",
         "MVP_REPORT_REQUESTS_PER_WINDOW",
         "LICHESS_TOTAL_TIMEOUT_SECONDS",
+        "LICHESS_MIN_COOLDOWN_SECONDS",
+        "LICHESS_MAX_COOLDOWN_SECONDS",
         "LICHESS_MAX_RESPONSE_BYTES",
     ],
 )
@@ -192,6 +194,18 @@ def test_budgets_and_lichess_bounds_must_be_positive(field_name) -> None:
         )
 
     assert exc_info.value.errors(include_input=False)[0]["loc"] == (field_name,)
+
+
+@pytest.mark.unit
+def test_lichess_min_cooldown_must_not_exceed_maximum() -> None:
+    with pytest.raises(ValidationError, match="must not exceed"):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            LICHESS_MIN_COOLDOWN_SECONDS=61,
+            LICHESS_MAX_COOLDOWN_SECONDS=60,
+            _env_file=None,
+        )
 
 
 @pytest.mark.unit
