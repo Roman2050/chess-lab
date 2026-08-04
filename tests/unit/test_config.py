@@ -77,7 +77,15 @@ def test_mvp_api_key_is_hidden_from_settings_repr() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "field_name",
-    ["MAX_ANALYSIS_TASKS_PER_REQUEST", "MAX_UPLOAD_GAMES"],
+    [
+        "MAX_ANALYSIS_TASKS_PER_REQUEST",
+        "MAX_UPLOAD_GAMES",
+        "MVP_RATE_LIMIT_WINDOW_SECONDS",
+        "MVP_LICHESS_IMPORTS_PER_WINDOW",
+        "MVP_UPLOADS_PER_WINDOW",
+        "MVP_ANALYSIS_REQUESTS_PER_WINDOW",
+        "MVP_REPORT_REQUESTS_PER_WINDOW",
+    ],
 )
 def test_operation_budgets_must_be_positive(field_name) -> None:
     with pytest.raises(ValidationError) as exc_info:
