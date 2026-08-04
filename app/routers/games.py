@@ -1,6 +1,5 @@
 import asyncio
 
-import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +24,15 @@ from app.services.aggregation.helpers import get_player_analyzed_games
 from app.services.aggregation.openings import get_opening_stats
 from app.services.db_manager import bulk_save_games
 from app.services.game_queries import get_filtered_games
-from app.services.lichess import fetch_games_from_lichess
+from app.services.lichess import (
+    LichessBusyError,
+    LichessConfigurationError,
+    LichessProtocolError,
+    LichessRateLimitedError,
+    LichessUnavailableError,
+    LichessUserNotFoundError,
+    fetch_games_from_lichess,
+)
 from app.security import (
     require_analysis_quota,
     require_lichess_import_quota,
@@ -55,10 +62,42 @@ async def load_from_lichess(
     """
     try:
         raw_pgn = await fetch_games_from_lichess(username, max_games, perf_type)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"Lichess API error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Unable to connect to Lichess API")
+    except LichessBusyError:
+        raise HTTPException(
+            status_code=409,
+            detail="Lichess import is already in progress",
+        ) from None
+    except LichessRateLimitedError as exc:
+        headers = (
+            {"Retry-After": str(exc.retry_after)}
+            if exc.retry_after is not None
+            else None
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Lichess rate limit is active, retry later",
+            headers=headers,
+        ) from None
+    except LichessUserNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Lichess user not found",
+        ) from None
+    except LichessConfigurationError:
+        raise HTTPException(
+            status_code=503,
+            detail="Lichess integration is unavailable",
+        ) from None
+    except LichessUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="Lichess is temporarily unavailable",
+        ) from None
+    except LichessProtocolError:
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid response from Lichess",
+        ) from None
 
     parsed_games = await asyncio.to_thread(parse_pgn_text, raw_pgn)
 
