@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/report", tags=["Report"])
 
 
+def require_allowed_report_language(
+    language: str = Query(default=settings.REPORT_LANGUAGE),
+) -> str:
+    """Return an allowed report language or reject the request."""
+    if language not in settings.REPORT_ALLOWED_LANGUAGES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Unsupported report language",
+        )
+    return language
+
+
 @router.post(
     "/{username}",
     response_model=ReportRequestResponse,
@@ -35,7 +47,7 @@ router = APIRouter(prefix="/report", tags=["Report"])
 async def request_report(
     username: str,
     response: Response,
-    language: str = Query(default=settings.REPORT_LANGUAGE),
+    language: str = Depends(require_allowed_report_language),
     db: AsyncSession = Depends(get_async_db),
 ):
     """Decide whether to (re)generate the report and act on it.
@@ -113,7 +125,7 @@ async def request_report(
 @router.get("/{username}", response_model=ReportResponse)
 async def read_report(
     username: str,
-    language: str = Query(default=settings.REPORT_LANGUAGE),
+    language: str = Depends(require_allowed_report_language),
     db: AsyncSession = Depends(get_async_db),
 ):
     """Return the cached report text, or 404 when nothing has been generated yet."""
@@ -146,7 +158,7 @@ async def read_report(
 @router.get("/{username}/status", response_model=ReportStatusResponse)
 async def read_report_status(
     username: str,
-    language: str = Query(default=settings.REPORT_LANGUAGE),
+    language: str = Depends(require_allowed_report_language),
     db: AsyncSession = Depends(get_async_db),
 ):
     """Report the generation state without returning the (potentially large) text."""

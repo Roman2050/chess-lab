@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -266,3 +266,55 @@ async def test_status_reports_state(api_client, patched):
     assert body["analyzed_games_count"] == 20
     assert body["current_analyzed_games_count"] == 25
     assert body["games_until_next_report"] == 15
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("POST", f"/report/{PLAYER}", id="post"),
+        pytest.param("GET", f"/report/{PLAYER}", id="get"),
+        pytest.param("GET", f"/report/{PLAYER}/status", id="status"),
+    ],
+)
+async def test_report_endpoints_accept_supported_language(
+    api_client,
+    patched,
+    method,
+    path,
+):
+    patched.count.return_value = 25
+    patched.get.return_value = _make_report(analyzed_games_count=20)
+
+    resp = await api_client.request(method, f"{path}?language=uk")
+
+    assert resp.status_code == 200
+    assert resp.json()["language"] == "uk"
+    patched.get.assert_awaited_once_with(ANY, PLAYER, "uk")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("POST", f"/report/{PLAYER}", id="post"),
+        pytest.param("GET", f"/report/{PLAYER}", id="get"),
+        pytest.param("GET", f"/report/{PLAYER}/status", id="status"),
+    ],
+)
+@pytest.mark.parametrize("language", ["EN", "fr"])
+async def test_report_endpoints_reject_unsupported_language(
+    api_client,
+    patched,
+    method,
+    path,
+    language,
+):
+    resp = await api_client.request(method, f"{path}?language={language}")
+
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "Unsupported report language"}
+    patched.count.assert_not_awaited()
+    patched.get.assert_not_awaited()

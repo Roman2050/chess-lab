@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_async_db
 from app.schemas.analysis import AnalysisProgress, BatchAnalysisResponse
 from app.security import require_mvp_api_key
@@ -30,7 +31,9 @@ async def enqueue_player_analysis(
     single game, and `-c N` on the worker gives parallelism. Enqueuing the same
     game twice is harmless: the task claims it atomically (see §7).
     """
-    game_ids = await get_unanalyzed_game_ids(db, username)
+    task_limit = settings.MAX_ANALYSIS_TASKS_PER_REQUEST
+    game_ids = await get_unanalyzed_game_ids(db, username, limit=task_limit)
+    game_ids = game_ids[:task_limit]
 
     if not game_ids:
         raise HTTPException(status_code=404, detail="No unanalyzed games for player")

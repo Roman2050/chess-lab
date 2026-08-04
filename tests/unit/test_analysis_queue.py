@@ -46,15 +46,21 @@ async def api_client(app, override_db, auth_headers):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_enqueue_player_analysis_fans_out(api_client, monkeypatch):
-    """One small task per unanalyzed game: delay() fires once per id."""
+async def test_enqueue_player_analysis_respects_task_limit(api_client, monkeypatch):
+    """A batch request never publishes more than its configured task budget."""
     import app.routers.analysis as analysis_router
 
-    async def fake_ids(_db, player_name):
+    async def fake_ids(_db, player_name, *, limit):
         assert player_name == PLAYER
-        return [1, 2, 3]
+        assert limit == 10
+        return list(range(1, 26))
 
     delay_mock = MagicMock()
+    monkeypatch.setattr(
+        analysis_router.settings,
+        "MAX_ANALYSIS_TASKS_PER_REQUEST",
+        10,
+    )
     monkeypatch.setattr(analysis_router, "get_unanalyzed_game_ids", fake_ids)
     monkeypatch.setattr(analysis_router.analyze_game, "delay", delay_mock)
 
@@ -62,10 +68,10 @@ async def test_enqueue_player_analysis_fans_out(api_client, monkeypatch):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"status": "queued", "player": PLAYER, "queued_count": 3}
+    assert body == {"status": "queued", "player": PLAYER, "queued_count": 10}
 
-    assert delay_mock.call_count == 3
-    assert [call.args[0] for call in delay_mock.call_args_list] == [1, 2, 3]
+    assert delay_mock.call_count == 10
+    assert [call.args[0] for call in delay_mock.call_args_list] == list(range(1, 11))
 
 
 @pytest.mark.unit
@@ -74,7 +80,8 @@ async def test_enqueue_player_analysis_empty_404(api_client, monkeypatch):
     """No unanalyzed games → 404 and nothing is enqueued."""
     import app.routers.analysis as analysis_router
 
-    async def fake_ids(_db, _player_name):
+    async def fake_ids(_db, _player_name, *, limit):
+        assert limit == 10
         return []
 
     delay_mock = MagicMock()
@@ -151,7 +158,7 @@ async def test_unanalyzed_ids_selects_claimable_statuses_only():
             result.scalars.return_value.all.return_value = [7]
             return result
 
-    ids = await get_unanalyzed_game_ids(_FakeDb(), "HeRo")
+    ids = await get_unanalyzed_game_ids(_FakeDb(), "HeRo", limit=10)
 
     assert ids == [7]
     sql = str(
@@ -163,6 +170,8 @@ async def test_unanalyzed_ids_selects_claimable_statuses_only():
     assert "is_analyzed" not in sql
     assert "lower(games.white_player) = lower('HeRo')" in sql
     assert "lower(games.black_player) = lower('HeRo')" in sql
+    assert "ORDER BY games.id" in sql
+    assert "LIMIT 10" in sql
 
 
 @pytest.mark.unit
