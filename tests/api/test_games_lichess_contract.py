@@ -2,6 +2,14 @@ import httpx
 import pytest
 
 from app.database import get_async_db
+from app.services.lichess import (
+    LichessBusyError,
+    LichessConfigurationError,
+    LichessProtocolError,
+    LichessRateLimitedError,
+    LichessUnavailableError,
+    LichessUserNotFoundError,
+)
 
 
 @pytest.fixture
@@ -27,13 +35,78 @@ async def api_client(app, override_db, auth_headers):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_lichess_route_maps_http_status_error(api_client, monkeypatch):
+@pytest.mark.parametrize(
+    ("service_error", "status_code", "detail"),
+    [
+        (
+            LichessBusyError(),
+            409,
+            "Lichess import is already in progress",
+        ),
+        (
+            LichessRateLimitedError(retry_after=None),
+            429,
+            "Lichess rate limit is active, retry later",
+        ),
+        (
+            LichessUserNotFoundError("<html>upstream not-found page</html>"),
+            404,
+            "Lichess user not found",
+        ),
+        (
+            LichessConfigurationError("Authorization: Bearer secret-token"),
+            503,
+            "Lichess integration is unavailable",
+        ),
+        (
+            LichessUnavailableError("network exception details"),
+            503,
+            "Lichess is temporarily unavailable",
+        ),
+        (
+            LichessProtocolError("<html>sensitive upstream response</html>"),
+            502,
+            "Invalid response from Lichess",
+        ),
+    ],
+)
+async def test_lichess_route_maps_service_errors_without_leaking_upstream(
+    api_client,
+    monkeypatch,
+    service_error: Exception,
+    status_code: int,
+    detail: str,
+):
     import app.routers.games as games_router
 
     async def fake_fetch(*_args, **_kwargs):
-        request = httpx.Request("GET", "https://lichess.org/api/games/user/u")
-        response = httpx.Response(429, text="Too Many Requests", request=request)
-        raise httpx.HTTPStatusError("error", request=request, response=response)
+        raise service_error
+
+    def should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("parse/bulk should not be called on fetch error")
+
+    monkeypatch.setattr(games_router, "fetch_games_from_lichess", fake_fetch)
+    monkeypatch.setattr(games_router, "parse_pgn_text", should_not_be_called)
+    monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
+
+    resp = await api_client.post("/games/lichess/u?max_games=1")
+    assert resp.status_code == status_code
+    assert resp.json() == {"detail": detail}
+    assert "<html>" not in resp.text
+    assert "secret-token" not in resp.text
+    assert "network exception details" not in resp.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_lichess_route_429_does_not_require_retry_after_in_chat_one(
+    api_client,
+    monkeypatch,
+):
+    import app.routers.games as games_router
+
+    async def fake_fetch(*_args, **_kwargs):
+        raise LichessRateLimitedError(retry_after=None)
 
     def should_not_be_called(*_args, **_kwargs):
         raise AssertionError("parse/bulk should not be called on fetch error")
@@ -44,27 +117,10 @@ async def test_lichess_route_maps_http_status_error(api_client, monkeypatch):
 
     resp = await api_client.post("/games/lichess/u?max_games=1")
     assert resp.status_code == 429
-    assert "Lichess API error:" in resp.json()["detail"]
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_lichess_route_maps_generic_exception_to_500(api_client, monkeypatch):
-    import app.routers.games as games_router
-
-    async def fake_fetch(*_args, **_kwargs):
-        raise RuntimeError("network down")
-
-    def should_not_be_called(*_args, **_kwargs):
-        raise AssertionError("parse/bulk should not be called on fetch error")
-
-    monkeypatch.setattr(games_router, "fetch_games_from_lichess", fake_fetch)
-    monkeypatch.setattr(games_router, "parse_pgn_text", should_not_be_called)
-    monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
-
-    resp = await api_client.post("/games/lichess/u?max_games=1")
-    assert resp.status_code == 500
-    assert resp.json()["detail"] == "Unable to connect to Lichess API"
+    assert resp.json() == {
+        "detail": "Lichess rate limit is active, retry later"
+    }
+    assert "Retry-After" not in resp.headers
 
 
 @pytest.mark.unit

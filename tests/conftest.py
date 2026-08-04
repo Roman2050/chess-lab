@@ -6,9 +6,10 @@ import pytest
 
 
 # IMPORTANT: The app config is loaded at import time (Settings()) and requires
-# DB_* plus MVP_API_KEY. Tests use a dedicated non-production key and set all
-# required values before importing any application module.
+# DB_*, MVP_API_KEY, and LICHESS_USER_AGENT. Tests use dedicated non-production
+# values and set all required settings before importing any application module.
 TEST_MVP_API_KEY = "test-mvp-api-key-0123456789abcdef"
+TEST_LICHESS_USER_AGENT = "ChessLabTest/0.1 (+https://example.invalid/contact)"
 
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5432")
@@ -16,6 +17,8 @@ os.environ.setdefault("DB_USER", "chess")
 os.environ.setdefault("DB_PASSWORD", "chess")
 os.environ.setdefault("DB_NAME", "chess_lab")
 os.environ["MVP_API_KEY"] = TEST_MVP_API_KEY
+os.environ["LICHESS_USER_AGENT"] = TEST_LICHESS_USER_AGENT
+os.environ["LICHESS_API_TOKEN"] = ""
 
 
 @pytest.fixture(autouse=True)

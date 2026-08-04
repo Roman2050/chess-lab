@@ -137,6 +137,26 @@ An exhausted budget returns 429 with `Retry-After` until the next window, while 
 Redis failure fails closed with 503. `/health` remains a liveness endpoint and
 `/ready` reports Redis availability.
 
+**3.12 Lichess Client Identity and Safe Error Boundary (Phase 7B, Chat 1)**
+The Lichess export client always sends a configured application identity:
+`User-Agent: LICHESS_USER_AGENT` and `Accept: application/x-chess-pgn`, plus an
+optional server-side bearer token. `LICHESS_USER_AGENT` is required at startup and
+generic HTTP-library identities are rejected; `LICHESS_API_TOKEN` is a `SecretStr`
+and a blank value means no token.
+
+The existing `/api/games/user/{username}` endpoint, query parameters, and successful
+`UploadResponse` stay unchanged. Redirects are not followed. The entire outbound
+operation is bounded by `LICHESS_TOTAL_TIMEOUT_SECONDS`, and a streaming read enforces
+`LICHESS_MAX_RESPONSE_BYTES` against both declared `Content-Length` and the actual
+decoded body. A successful response must be strict UTF-8 PGN/plain text (or a
+PGN-like body when `Content-Type` is absent); HTML, JSON, XML, unsupported media
+types, and HTML body signatures are rejected.
+
+The service translates expected upstream failures into plain `LichessError`
+subclasses. The router maps them to short 404/429/502/503 responses and never returns
+the upstream body, request headers, query, or original exception text. There is no
+automatic retry, sleep, `Retry-After` parsing, or Redis coordination in Chat 1.
+
 ---
 
 ## 4. Project File Structure
@@ -164,7 +184,7 @@ chess-lab/
 │   │   └── report.py          # [PLANNED Phase 5] LLM report POST/GET/status
 │   ├── services/
 │   │   ├── rate_limit.py      # Atomic Redis fixed-window quotas for expensive POST
-│   │   ├── lichess.py         # fetch_games_from_lichess() → raw PGN text
+│   │   ├── lichess.py         # identified, timeout/size-bounded Lichess PGN client
 │   │   ├── db_manager.py      # bulk_save_games() with on_conflict_do_nothing
 │   │   ├── game_queries.py    # get_filtered_games(): filters + pagination,
 │   │   │                      #   summary columns only (§3.7)
@@ -362,7 +382,7 @@ read-side from them — no extra fields and no schema change are required.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/games/lichess/{username}` | Fetch games from Lichess API, parse, save |
+| `POST` | `/games/lichess/{username}` | Fetch a bounded PGN export through the identified Lichess client, parse, save |
 | `POST` | `/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB or `MAX_UPLOAD_GAMES`, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
 | `GET` | `/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
 | `GET` | `/games/{game_id}` | Full game detail including pgn_content |
@@ -590,6 +610,12 @@ DB_USER=chess
 DB_PASSWORD=chess
 DB_NAME=chess_lab
 REDIS_URL=redis://localhost:6379/0
+
+# Lichess client (Phase 7B Chat 1)
+LICHESS_USER_AGENT=ChessLab/0.1 (+https://your-real-contact.example)  # required
+LICHESS_API_TOKEN=                      # optional server-side secret
+LICHESS_TOTAL_TIMEOUT_SECONDS=30
+LICHESS_MAX_RESPONSE_BYTES=5242880      # 5 MiB hard response-body limit
 
 # Per-request operation budgets (Phase 7A)
 MAX_ANALYSIS_TASKS_PER_REQUEST=10

@@ -1,7 +1,7 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
-from app.config import Settings
+from app.config import Settings, settings as application_settings
 
 
 BASE_SETTINGS = {
@@ -10,6 +10,7 @@ BASE_SETTINGS = {
     "DB_USER": "user",
     "DB_PASSWORD": "p@ssword#with$special%chars&",
     "DB_NAME": "chess_db",
+    "LICHESS_USER_AGENT": "ChessLabUnitTests/0.1 (+https://example.invalid/contact)",
 }
 VALID_MVP_API_KEY = "unit-test-mvp-key-0123456789abcdef"
 
@@ -75,6 +76,98 @@ def test_mvp_api_key_is_hidden_from_settings_repr() -> None:
 
 
 @pytest.mark.unit
+def test_lichess_user_agent_is_required(monkeypatch) -> None:
+    monkeypatch.delenv("LICHESS_USER_AGENT", raising=False)
+    values = {
+        key: value
+        for key, value in BASE_SETTINGS.items()
+        if key != "LICHESS_USER_AGENT"
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            **values,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            _env_file=None,
+        )
+
+    error = exc_info.value.errors(include_input=False)[0]
+    assert error["loc"] == ("LICHESS_USER_AGENT",)
+    assert error["type"] == "missing"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "user_agent",
+    [
+        "",
+        "   ",
+        "ChessLab/0.1\rInjected: value",
+        "ChessLab/0.1\nInjected: value",
+        "python-httpx/0.28.1",
+        "curl/8.14.1",
+        "Wget/1.25.0",
+        "python-requests/2.32.0",
+    ],
+)
+def test_lichess_user_agent_rejects_unsafe_or_generic_values(user_agent: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            **{**BASE_SETTINGS, "LICHESS_USER_AGENT": user_agent},
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            _env_file=None,
+        )
+
+
+@pytest.mark.unit
+def test_lichess_user_agent_is_available_to_application_client() -> None:
+    user_agent = "ChessLab/0.1 (+mailto:operator@example.com)"
+
+    settings = Settings(
+        **{**BASE_SETTINGS, "LICHESS_USER_AGENT": user_agent},
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        _env_file=None,
+    )
+
+    assert settings.LICHESS_USER_AGENT == user_agent
+
+
+@pytest.mark.unit
+def test_test_suite_sets_deterministic_application_user_agent_before_import() -> None:
+    assert application_settings.LICHESS_USER_AGENT == (
+        "ChessLabTest/0.1 (+https://example.invalid/contact)"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("token", ["", "   ", SecretStr("")])
+def test_blank_lichess_api_token_is_absent(token: str | SecretStr) -> None:
+    settings = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        LICHESS_API_TOKEN=token,
+        _env_file=None,
+    )
+
+    assert settings.LICHESS_API_TOKEN is None
+
+
+@pytest.mark.unit
+def test_lichess_api_token_has_secret_representation() -> None:
+    token = "unit-test-lichess-secret"
+    settings = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        LICHESS_API_TOKEN=token,
+        _env_file=None,
+    )
+
+    assert settings.LICHESS_API_TOKEN is not None
+    assert settings.LICHESS_API_TOKEN.get_secret_value() == token
+    assert token not in repr(settings)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "field_name",
     [
@@ -85,9 +178,11 @@ def test_mvp_api_key_is_hidden_from_settings_repr() -> None:
         "MVP_UPLOADS_PER_WINDOW",
         "MVP_ANALYSIS_REQUESTS_PER_WINDOW",
         "MVP_REPORT_REQUESTS_PER_WINDOW",
+        "LICHESS_TOTAL_TIMEOUT_SECONDS",
+        "LICHESS_MAX_RESPONSE_BYTES",
     ],
 )
-def test_operation_budgets_must_be_positive(field_name) -> None:
+def test_budgets_and_lichess_bounds_must_be_positive(field_name) -> None:
     with pytest.raises(ValidationError) as exc_info:
         Settings(
             **BASE_SETTINGS,

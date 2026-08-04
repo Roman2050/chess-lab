@@ -11,6 +11,17 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
 
+GENERIC_HTTP_USER_AGENTS = (
+    "aiohttp",
+    "curl",
+    "httpie",
+    "postmanruntime",
+    "python-httpx",
+    "python-requests",
+    "wget",
+)
+
+
 class Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: int
@@ -33,6 +44,14 @@ class Settings(BaseSettings):
     MVP_UPLOADS_PER_WINDOW: int = Field(default=10, ge=1)
     MVP_ANALYSIS_REQUESTS_PER_WINDOW: int = Field(default=20, ge=1)
     MVP_REPORT_REQUESTS_PER_WINDOW: int = Field(default=5, ge=1)
+
+    # Lichess requires a stable application identity with a real contact. The
+    # endpoint is always enabled in the MVP, so a generic HTTP-client identity
+    # is a startup configuration error rather than a runtime fallback.
+    LICHESS_USER_AGENT: str
+    LICHESS_API_TOKEN: SecretStr | None = None
+    LICHESS_TOTAL_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0)
+    LICHESS_MAX_RESPONSE_BYTES: int = Field(default=5 * 1024 * 1024, ge=1)
 
     # Stockfish — path is optional (analysis tasks no-op when missing); the
     # tuning knobs have engine-sane defaults. Ranges are sanity bounds, not
@@ -65,6 +84,33 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         hide_input_in_errors=True,
     )
+
+    @field_validator("LICHESS_USER_AGENT")
+    @classmethod
+    def validate_lichess_user_agent(cls, value: str) -> str:
+        """Require a non-generic Lichess application identity."""
+        user_agent = value.strip()
+        if not user_agent:
+            raise ValueError("LICHESS_USER_AGENT must not be blank")
+        if "\r" in value or "\n" in value:
+            raise ValueError("LICHESS_USER_AGENT must not contain CR or LF")
+
+        product = (
+            user_agent.casefold().split("/", maxsplit=1)[0].split(maxsplit=1)[0]
+        )
+        if product in GENERIC_HTTP_USER_AGENTS:
+            raise ValueError("LICHESS_USER_AGENT must identify the application")
+        return user_agent
+
+    @field_validator("LICHESS_API_TOKEN", mode="before")
+    @classmethod
+    def normalize_blank_lichess_api_token(cls, value: object) -> object:
+        """Treat a blank optional Lichess token as absent."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        if isinstance(value, SecretStr) and not value.get_secret_value().strip():
+            return None
+        return value
 
     @field_validator("REPORT_ALLOWED_LANGUAGES", mode="before")
     @classmethod
