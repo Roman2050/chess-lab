@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chess
+          POSTGRES_PASSWORD: chess
+          POSTGRES_DB: chess_lab_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U chess -d chess_lab_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --dev
+
+      - name: Enforce Lichess HTTP boundary
+        run: uv run --no-sync python scripts/check_lichess_http_boundary.py
+
+      - name: Run automated test suite
+        run: uv run --no-sync pytest
