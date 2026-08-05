@@ -71,8 +71,13 @@ required only to generate reports.
    ```bash
    docker compose up -d db redis
    uv sync --dev
+   uv run python scripts/download_eco.py
    uv run alembic upgrade head
    ```
+
+   `data/eco.json` is a generated artifact and is intentionally ignored by Git.
+   Generate it once after checkout and again when refreshing the upstream opening
+   dataset.
 
 3. Start the API:
 
@@ -119,6 +124,7 @@ Unit tests do not need external services. Integration tests use the dedicated
 `db_test` PostgreSQL service on port 5433.
 
 ```bash
+uv run python scripts/download_eco.py
 uv run pytest -m unit
 docker compose up -d db_test
 uv run pytest -m integration
@@ -128,8 +134,9 @@ uv run python scripts/check_lichess_http_boundary.py
 
 The GitHub Actions workflow runs the locked dependency set, the Lichess boundary
 guard as a separate visible step, and the complete automated test suite against a
-disposable PostgreSQL service. Automated tests mock Lichess and never spend its
-quota.
+disposable PostgreSQL service. It builds the ignored local ECO dictionary from the
+official source before running tests. Automated tests mock the Lichess API and never
+spend its quota.
 
 ## Operations and safety
 

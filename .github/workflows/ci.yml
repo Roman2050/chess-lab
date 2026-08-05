@@ -42,6 +42,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --dev
 
+      - name: Build local ECO dictionary
+        run: uv run --no-sync python scripts/download_eco.py
+
       - name: Enforce Lichess HTTP boundary
         run: uv run --no-sync python scripts/check_lichess_http_boundary.py
 

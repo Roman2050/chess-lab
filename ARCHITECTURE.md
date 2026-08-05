@@ -41,7 +41,11 @@ detect "only move" situations — when the gap between the first and second line
 **3.3 Local ECO Opening Dictionary**
 PGN files may not contain the `Opening` tag. The system must recognize openings from
 the first moves by matching FEN or move sequences against a local JSON/ECO dictionary.
-This enrichment happens at PGN parse time.
+This enrichment happens at PGN parse time. `data/eco.json` is generated from the
+official `lichess-org/chess-openings` dataset by `scripts/download_eco.py` and is
+intentionally ignored by Git. Local bootstrap and CI must build it after dependencies
+are installed and before the application or test suite parses PGN without an
+`Opening` tag.
 
 **3.4 Memory-Efficient FEN Storage**
 FEN strings are stored in the DB **only for moves with errors** (inaccuracy / mistake /
@@ -259,7 +263,10 @@ chess-lab/
 │   ├── api/                   # API-level tests (ASGI transport, DB overrides)
 │   ├── integration/           # Tests requiring live Postgres
 │   └── unit/                  # Isolated tests (no DB, no network)
+├── data/
+│   └── eco.json               # Generated local opening dictionary (gitignored)
 ├── scripts/
+│   ├── download_eco.py        # Build data/eco.json from the upstream CC0 dataset
 │   ├── check_db.py            # Quick DB connectivity check
 │   └── check_lichess_http_boundary.py  # Static outbound-client ownership guard
 ├── docs/
