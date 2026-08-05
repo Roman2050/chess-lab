@@ -62,8 +62,7 @@ winning chances, via a logistic map `WP(cp) = 100 / (1 + exp(-WP_SCALE * cp))`. 
 is a **read-side derived metric**: it is computed from the `eval_before` / `eval_after`
 already stored for every move (§5.3), so there is **no DB change, no migration, no
 re-analysis**. The `cp_loss` classification thresholds, `MultiPV`, and `analysis_data`
-schema are untouched; ACPL remains for the public `/stats` endpoints. See
-`Phase_6-WinProbabilityMetric.md`.
+schema are untouched; ACPL remains for the public `/stats` endpoints.
 
 Calibration on real-player data showed that already decided positions dilute the
 average with near-zero losses. WP aggregations therefore include a move only when
@@ -137,7 +136,7 @@ An exhausted budget returns 429 with `Retry-After` until the next window, while 
 Redis failure fails closed with 503. `/health` remains a liveness endpoint and
 `/ready` reports Redis availability.
 
-**3.12 Lichess Client Identity and Safe Error Boundary (Phase 7B, Chat 1)**
+**3.12 Lichess Client Identity and Safe Error Boundary**
 The Lichess export client always sends a configured application identity:
 `User-Agent: LICHESS_USER_AGENT` and `Accept: application/x-chess-pgn`, plus an
 optional server-side bearer token. `LICHESS_USER_AGENT` is required at startup and
@@ -154,10 +153,11 @@ types, and HTML body signatures are rejected.
 
 The service translates expected upstream failures into plain `LichessError`
 subclasses. The router maps them to short 404/429/502/503 responses and never returns
-the upstream body, request headers, query, or original exception text. There is no
-automatic retry, sleep, `Retry-After` parsing, or Redis coordination in Chat 1.
+the upstream body, request headers, query, or original exception text. The client does
+not retry or sleep automatically; `Retry-After` parsing and Redis coordination belong
+to the deployment-wide gate described in §3.13.
 
-**3.13 Lichess Distributed Single-Flight and Cooldown (Phase 7B, Chat 2)**
+**3.13 Lichess Distributed Single-Flight and Cooldown**
 Every Lichess export passes through a deployment-wide Redis gate. A token-owned lock
 at `chess-lab:lichess:request-lock` is acquired with `SET NX PX`; its TTL is the hard
 Lichess total timeout plus a 15-second safety margin. A busy lock fails immediately
@@ -171,6 +171,27 @@ is released, and returned as `Retry-After`. Active cooldowns return local 429 re
 without an outbound request. Redis failures and malformed persistent cooldown state
 fail closed with a generic 503. Request handlers never wait for the lock, retry, or
 sleep.
+
+**3.14 Lichess Observability and HTTP Boundary**
+Each accepted Lichess integration call emits exactly one
+`lichess.request.started` event and, after all Redis gate cleanup, exactly one terminal
+event: `succeeded`, `busy`, `rate_limited`, or `failed`. The pair shares an opaque
+`operation_id`; terminal duration uses a monotonic clock and covers Redis checks,
+lock acquire/release, and HTTP work, but ends before PGN parsing or database writes.
+`status` is a lifecycle category, while an upstream code is carried separately in
+`upstream_http_status`. Rate-limit source and failure kind are bounded categories.
+
+Structured fields never contain PGN, upstream body/prefix, Authorization token, MVP
+key, original exception text, or the full URL/query. The only permitted response
+metadata is normalized content type and declared/factual body byte counts. `/health`
+and `/ready` never call Lichess; readiness checks Redis availability only.
+
+All outbound export URL/route literals are owned by `app/services/lichess.py`.
+`scripts/check_lichess_http_boundary.py` enforces this over production `app/**/*.py`
+via the stdlib AST, and CI runs it as a separate required step before the complete
+automated test suite. Operator recovery is documented in
+`docs/runbooks/lichess.md`; production cooldown and lock keys must not be deleted to
+bypass the integration safety boundary.
 
 ---
 
@@ -239,10 +260,17 @@ chess-lab/
 │   ├── integration/           # Tests requiring live Postgres
 │   └── unit/                  # Isolated tests (no DB, no network)
 ├── scripts/
-│   └── check_db.py            # Quick DB connectivity check
+│   ├── check_db.py            # Quick DB connectivity check
+│   └── check_lichess_http_boundary.py  # Static outbound-client ownership guard
+├── docs/
+│   └── runbooks/
+│       └── lichess.md         # Lichess operations and safe recovery guide
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # Boundary guard + complete automated test suite
 ├── docker-compose.yml         # PostgreSQL 16 + (planned) Redis
 ├── pyproject.toml             # Dependencies, pytest config, build system
-├── ARCHITECTURE.md            # This file — always read at start of new chat
+├── ARCHITECTURE.md            # This file — read before architectural changes
 └── .env                       # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
                                # REDIS_URL, STOCKFISH_*
 ```
@@ -410,7 +438,7 @@ read-side from them — no extra fields and no schema change are required.
 | `POST` | `/analyze/player/{username}` | Enqueue up to `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable games, ordered by id |
 | `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
-| `GET` | `/ready` | Readiness check; 503 when Redis quota enforcement is unavailable |
+| `GET` | `/ready` | Readiness check; 503 when Redis quota/coordination availability is unavailable; never calls Lichess |
 
 Every endpoint parameter that identifies a player is case-insensitive on the
 database read side (§3.9); response shapes and the requested display spelling are
@@ -426,8 +454,8 @@ unchanged.
 
 All three accept `?language=` (default `REPORT_LANGUAGE`, currently `en`) and reject
 values outside the case-sensitive `REPORT_ALLOWED_LANGUAGES` allowlist with 422. The
-report is a one-shot generated text (not a chat): `POST` triggers a background Celery
-task, `GET` reads the cached result. See Section 7.1.
+report is a one-shot generated text rather than an interactive conversation: `POST`
+triggers a background Celery task, and `GET` reads the cached result. See Section 7.1.
  
 ---
 
@@ -588,7 +616,6 @@ config change. Generation runs as a background Celery task `generate_player_repo
 the result is cached in `PlayerReport` and exposed via `POST` / `GET` /
 `GET .../status`. Reports are regenerated only when the player's analyzed-game count
 has grown by `REPORT_REFRESH_THRESHOLD` since the last snapshot (Section 7.1).
-See `Phase_5-LLMIntegration.md` for the per-chat implementation plan.
 
 **Phase 6 — Win-Probability Report Metric**
 The report uses **win-probability loss** instead of raw ACPL (Section 3.6): a
@@ -600,7 +627,6 @@ artifact) and yields a metric both humans and the LLM read intuitively. The publ
 `/stats` endpoints stay on ACPL; `/stats/.../moves` gains `avg_wp_loss` alongside
 `avg_cp_loss`. It is a **read-side derived metric** over existing `eval_before` /
 `eval_after` — no DB change, no migration, no re-analysis.
-See `Phase_6-WinProbabilityMetric.md` for the per-chat implementation plan.
 
 ---
 
