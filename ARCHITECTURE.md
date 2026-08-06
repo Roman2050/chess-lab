@@ -197,6 +197,41 @@ automated test suite. Operator recovery is documented in
 `docs/runbooks/lichess.md`; production cooldown and lock keys must not be deleted to
 bypass the integration safety boundary.
 
+**3.15 Celery Runtime Isolation and Delivery (Phase 7)**
+CPU-bound analysis and I/O-bound report generation use separate queues. Exact task
+routes send `app.tasks.celery_app.analyze_game` to `analysis` and
+`app.tasks.celery_app.generate_player_report` to `reports`. Workers use
+`worker_prefetch_multiplier=1`, so a child executing one long task does not reserve
+additional work. PostgreSQL remains the progress and report-state store; Celery has
+no result backend.
+
+Long tasks deliberately retain Celery's early-ack semantics:
+`task_acks_late=False` and `task_reject_on_worker_lost=False`. After an analysis task
+claims a row, its status is already `running`; redelivery after process death cannot
+claim that row again without a lease/heartbeat/reaper. Late ack would therefore not
+recover the game and could create a message loop. A normal exception still records
+`failed`, but process or host death may leave a visible stale `running` row. Planned
+deployments use warm worker shutdown; controlled operator recovery belongs to the
+Phase 8 runbook.
+
+Each analysis prefork child lazily owns one long-lived UCI process. The process is
+created only after a game claim succeeds, gets `Threads` and `Hash` once at startup,
+and is pinged before reuse. A failed ping closes the old process best-effort and
+creates a configured replacement. `MultiPV=2` and depth remain per-position call
+parameters. `worker_process_shutdown` closes the child-owned process best-effort.
+This is process-local ownership for one task at a time, not a thread-safe engine
+pool. Report-only workers never initialize Stockfish. Standalone callers of
+`StockfishEngine.analyse_game()` still own and close their temporary process.
+
+Report generation retries only `LLMError`: three retries after the initial attempt,
+with exponential backoff and jitter. Intermediate failures retain the atomic
+`generating` claim; the final `LLMError` marks the report `failed` once and propagates,
+as does every non-LLM exception without retry. The configured report lease must be
+at least `4 × LLM_TIMEOUT + 7` seconds, covering four calls plus the maximum
+one-, two-, and four-second backoffs. Initial queue wait remains unbounded, so the
+separate reports queue requires backlog/oldest-message monitoring in Phase 8; the
+lease is not an exactly-once or task-ownership guarantee.
+
 ---
 
 ## 4. Project File Structure
@@ -360,9 +395,9 @@ the stored display value. `generating` doubles as the claim: the row is flipped 
 `POST /report` *before* the task is enqueued, and only the worker moves it on to
 `ready` / `failed`. Because a killed worker leaves nothing behind that could finish
 the job, `generating` carries a lease — a row untouched for
-`REPORT_GENERATION_LEASE_SECONDS` (default 900, well above `LLM_TIMEOUT`) is
-considered abandoned and may be reclaimed. `updated_at` is the lease clock: nothing
-else writes the row while it is `generating`.
+`REPORT_GENERATION_LEASE_SECONDS` (default 900 and validated against the complete
+LLM retry window; §3.15) is considered abandoned and may be reclaimed. `updated_at`
+is the lease clock: nothing else writes the row while it is `generating`.
 
 **Regeneration is driven by `analyzed_games_count`, not by date.** A report is
 (re)generated only when the count of the player's analyzed games has grown by at
@@ -466,7 +501,7 @@ triggers a background Celery task, and `GET` reads the cached result. See Sectio
  
 ---
 
-## 7. Background Processing Flow (Planned)
+## 7. Background Processing Flow
 
 Stockfish runs for minutes, so the task never holds a DB session while it works:
 `analyze_game` is three phases, two of them short transactions.
@@ -485,7 +520,9 @@ FastAPI route → Celery task enqueue (Redis)
     no row back → another worker owns it (or it is already completed) → return
                      ↓
   ── phase B: analyse (NO session open) ───────────────────────────
-         Stockfish.analyse() with MultiPV=2
+         lazy child-owned Stockfish process; ping before reuse
+                     ↓
+         Stockfish.analyse() with per-call MultiPV=2
                      ↓
          classifier.py → cp_loss → classification
                      ↓
@@ -508,7 +545,7 @@ the row lock and re-evaluates the predicate after the winner commits, matching z
 rows. `POST /games/{game_id}/analyze` still rejects an already-analyzed game with 400,
 but only as a fast, non-authoritative check.
 
-### 7.1 Report Generation Flow (Planned, Phase 5)
+### 7.1 Report Generation Flow
 
 The LLM is a **narrator, not an analyst**: every number and conclusion is computed
 deterministically in code (Phase 4 aggregations + derived `insights`); the model only
@@ -553,7 +590,9 @@ POST /report/{username}?language=en
        PlayerReport: report_text, analyzed_games_count snapshot,
               last_game_played_at, status=ready
                                        ↓
-    any exception → fresh session: status=failed (previous text kept)
+    intermediate LLMError → bounded retry; status remains generating
+    final LLMError → fresh session: status=failed → re-raise
+    any non-LLM exception → no retry; status=failed → re-raise
 ```
 
 Decision table (`threshold = REPORT_REFRESH_THRESHOLD`, default 20):
@@ -706,5 +745,5 @@ LLM_TIMEOUT=120                          # seconds per generation (1..600)
 REPORT_LANGUAGE=en                       # default report language
 REPORT_ALLOWED_LANGUAGES=en,uk           # case-sensitive comma-separated allowlist
 REPORT_REFRESH_THRESHOLD=20              # new analyzed games needed to regenerate
-REPORT_GENERATION_LEASE_SECONDS=900      # when a stuck `generating` may be reclaimed
+REPORT_GENERATION_LEASE_SECONDS=900      # must be >= 4 * LLM_TIMEOUT + 7
 ```
