@@ -3,6 +3,43 @@ import httpx
 from app.services.llm.base import LLMError
 
 
+_MAX_ERROR_DETAIL_LENGTH = 500
+_SENSITIVE_ERROR_STATUSES = frozenset({401, 403})
+
+
+def _supports_temperature(model: str) -> bool:
+    return not model.casefold().startswith("gpt-5")
+
+
+def _safe_error_detail(response: httpx.Response) -> str | None:
+    if response.status_code in _SENSITIVE_ERROR_STATUSES:
+        return None
+
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    error = data.get("error")
+    if not isinstance(error, dict):
+        return None
+
+    message = error.get("message")
+    if not isinstance(message, str):
+        return None
+
+    normalized = " ".join(message.split())
+    if not normalized:
+        return None
+
+    if len(normalized) > _MAX_ERROR_DETAIL_LENGTH:
+        return f"{normalized[:_MAX_ERROR_DETAIL_LENGTH]}..."
+    return normalized
+
+
 class OpenAICompatibleProvider:
     """LLM provider for any OpenAI-compatible /chat/completions endpoint.
 
@@ -36,9 +73,10 @@ class OpenAICompatibleProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": self.temperature,
             "stream": False,
         }
+        if _supports_temperature(self.model):
+            payload["temperature"] = self.temperature
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
@@ -47,9 +85,11 @@ class OpenAICompatibleProvider:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as exc:
-            raise LLMError(
-                f"LLM request failed with status {exc.response.status_code}"
-            ) from exc
+            message = f"LLM request failed with status {exc.response.status_code}"
+            detail = _safe_error_detail(exc.response)
+            if detail:
+                message = f"{message}: {detail}"
+            raise LLMError(message) from exc
         except httpx.HTTPError as exc:
             raise LLMError(f"LLM request failed: {exc}") from exc
         except (KeyError, IndexError, TypeError, ValueError) as exc:
