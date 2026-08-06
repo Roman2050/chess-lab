@@ -34,23 +34,20 @@ def _analysis_infos() -> list[list[dict]]:
     ]
 
 
-def _mock_uci_engine() -> tuple[MagicMock, MagicMock]:
+def _mock_uci_engine() -> MagicMock:
     engine = MagicMock()
     engine.options = {}
     engine.analyse.side_effect = _analysis_infos()
-
-    context = MagicMock()
-    context.__enter__.return_value = engine
-    return engine, context
+    return engine
 
 
 @pytest.mark.unit
 def test_engine_called_n_plus_1_times() -> None:
-    engine, context = _mock_uci_engine()
+    engine = _mock_uci_engine()
 
     with patch(
         "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci",
-        return_value=context,
+        return_value=engine,
     ):
         result = StockfishEngine("stockfish").analyse_game(_PGN)
 
@@ -60,11 +57,11 @@ def test_engine_called_n_plus_1_times() -> None:
 
 @pytest.mark.unit
 def test_eval_chaining() -> None:
-    _, context = _mock_uci_engine()
+    engine = _mock_uci_engine()
 
     with patch(
         "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci",
-        return_value=context,
+        return_value=engine,
     ):
         result = StockfishEngine("stockfish").analyse_game(_PGN)
 
@@ -78,11 +75,11 @@ def test_eval_chaining() -> None:
 
 @pytest.mark.unit
 def test_best_move_comes_from_pre_move_position() -> None:
-    _, context = _mock_uci_engine()
+    engine = _mock_uci_engine()
 
     with patch(
         "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci",
-        return_value=context,
+        return_value=engine,
     ):
         result = StockfishEngine("stockfish").analyse_game(_PGN)
 
@@ -92,11 +89,11 @@ def test_best_move_comes_from_pre_move_position() -> None:
 @pytest.mark.unit
 def test_engine_returns_second_pv() -> None:
     """Each move carries the second PV evaluation from its pre-move position."""
-    _, context = _mock_uci_engine()
+    engine = _mock_uci_engine()
 
     with patch(
         "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci",
-        return_value=context,
+        return_value=engine,
     ):
         result = StockfishEngine("stockfish").analyse_game(_PGN)
 
@@ -124,3 +121,40 @@ def test_empty_and_unparseable_pgn(pgn_content: str) -> None:
 
     assert result == []
     popen_uci.assert_not_called()
+
+
+@pytest.mark.unit
+def test_standalone_analyse_game_still_owns_engine_lifecycle() -> None:
+    engine = _mock_uci_engine()
+    engine.options = {"Threads": object(), "Hash": object()}
+
+    with patch(
+        "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci",
+        return_value=engine,
+    ) as popen_uci:
+        StockfishEngine(
+            "stockfish",
+            threads=2,
+            hash_mb=64,
+        ).analyse_game(_PGN)
+
+    popen_uci.assert_called_once_with("stockfish")
+    engine.configure.assert_called_once_with({"Threads": 2, "Hash": 64})
+    engine.quit.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_injected_engine_is_not_reconfigured_or_closed() -> None:
+    engine = _mock_uci_engine()
+    wrapper = StockfishEngine("stockfish", threads=2, hash_mb=64)
+
+    with (
+        patch.object(wrapper, "open_engine") as open_engine,
+        patch.object(wrapper, "_configure_uci_options") as configure,
+    ):
+        result = wrapper.analyse_game(_PGN, engine=engine)
+
+    assert len(result) == 4
+    open_engine.assert_not_called()
+    configure.assert_not_called()
+    engine.quit.assert_not_called()

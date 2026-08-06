@@ -6,11 +6,28 @@ from types import SimpleNamespace
 from unittest.mock import DEFAULT, MagicMock
 
 import pytest
+from celery.exceptions import Retry
 
 from app.services.llm.base import LLMError
 
 PLAYER = "hero"
 LANGUAGE = "en"
+
+
+@contextmanager
+def _task_request(task, *, retries: int):
+    """Push a worker-like Celery request around a direct task invocation."""
+    task.push_request(
+        args=(PLAYER, LANGUAGE),
+        kwargs={},
+        retries=retries,
+        called_directly=False,
+        is_eager=True,
+    )
+    try:
+        yield
+    finally:
+        task.pop_request()
 
 
 @pytest.fixture
@@ -105,17 +122,38 @@ def test_generate_report_zero_games_marks_failed(patched_task):
 
 
 @pytest.mark.unit
-def test_generate_report_llmerror_marks_failed(patched_task):
+def test_report_intermediate_llm_error_retries_without_marking_failed(
+    patched_task,
+):
     patched_task.build_ctx.return_value = SimpleNamespace(
         analyzed_games_count=5,
         last_game_played_at=None,
     )
     patched_task.provider.generate.side_effect = LLMError("boom")
+    task = patched_task.celery_app.generate_player_report
 
-    # Must not propagate — the worker stays alive.
-    result = patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE)
+    with _task_request(task, retries=0):
+        with pytest.raises(Retry):
+            task.run(PLAYER, LANGUAGE)
 
-    assert result is None
+    patched_task.save_result.assert_not_called()
+    patched_task.mark_failed.assert_not_called()
+
+
+@pytest.mark.unit
+def test_report_final_llm_error_marks_failed_once_and_reraises(patched_task):
+    patched_task.build_ctx.return_value = SimpleNamespace(
+        analyzed_games_count=5,
+        last_game_played_at=None,
+    )
+    error = LLMError("boom")
+    patched_task.provider.generate.side_effect = error
+    task = patched_task.celery_app.generate_player_report
+
+    with _task_request(task, retries=3):
+        with pytest.raises(LLMError, match="boom"):
+            task.run(PLAYER, LANGUAGE)
+
     patched_task.save_result.assert_not_called()
     patched_task.mark_failed.assert_called_once_with(
         patched_task.session, PLAYER, LANGUAGE
@@ -124,7 +162,7 @@ def test_generate_report_llmerror_marks_failed(patched_task):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failing_phase", ["context", "llm", "save"])
-def test_llm_task_marks_failed_on_any_exception(patched_task, failing_phase):
+def test_report_non_llm_error_is_not_retried(patched_task, failing_phase):
     """Any phase blowing up must land in `failed`, not leave the row generating."""
     patched_task.build_ctx.return_value = SimpleNamespace(
         analyzed_games_count=5,
@@ -140,8 +178,8 @@ def test_llm_task_marks_failed_on_any_exception(patched_task, failing_phase):
         case "save":
             patched_task.save_result.side_effect = boom
 
-    # Swallowed, like LLMError: a failed report must not kill the worker.
-    assert patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE) is None
+    with pytest.raises(RuntimeError, match="boom"):
+        patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE)
 
     patched_task.mark_failed.assert_called_once_with(
         patched_task.session, PLAYER, LANGUAGE
@@ -175,9 +213,10 @@ def test_failure_marked_in_a_fresh_session(patched_task):
         analyzed_games_count=5,
         last_game_played_at=None,
     )
-    patched_task.provider.generate.side_effect = LLMError("boom")
+    patched_task.provider.generate.side_effect = RuntimeError("boom")
 
-    patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE)
+    with pytest.raises(RuntimeError, match="boom"):
+        patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE)
 
     assert patched_task.events == [
         "session_enter",  # phase A: context

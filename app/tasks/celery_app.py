@@ -1,13 +1,16 @@
 import logging
 
-from celery import Celery
+from celery import Celery, Task
+from celery.signals import worker_process_shutdown
+from chess.engine import SimpleEngine
 from sqlalchemy import Update, func, update
 
-from app.config import settings
+from app.config import REPORT_LLM_MAX_RETRIES, settings
 from app.database import get_sync_db_session
 from app.models.db import ANALYSIS_STATUS_CLAIMABLE, Game
 from app.services.analysis.classifier import build_analysis_data
 from app.services.analysis.engine import StockfishEngine
+from app.services.llm.base import LLMError
 from app.services.llm.factory import get_llm_provider
 from app.services.report_context import build_report_context
 from app.services.report_prompt import build_messages
@@ -22,10 +25,77 @@ celery_app = Celery(
     "chess_lab",
     broker=settings.redis_url,
 )
+celery_app.conf.update(
+    task_routes={
+        "app.tasks.celery_app.analyze_game": {"queue": "analysis"},
+        "app.tasks.celery_app.generate_player_report": {"queue": "reports"},
+    },
+    worker_prefetch_multiplier=1,
+    task_acks_late=False,
+    task_reject_on_worker_lost=False,
+)
 
 # `analysis_error` is an unbounded text column, but a whole traceback inside a
 # status field is noise — the full exception goes to the log instead.
 _ANALYSIS_ERROR_MAX_LEN = 1000
+# Celery prefork children do not share module state. Each analysis child lazily
+# owns one UCI process, while a reports-only child never reaches this holder.
+_worker_engine: SimpleEngine | None = None
+
+
+def _stockfish_wrapper() -> StockfishEngine:
+    """Build the lightweight wrapper for the configured analysis policy."""
+    return StockfishEngine(
+        settings.STOCKFISH_PATH or "",
+        depth=settings.STOCKFISH_DEPTH,
+        multipv=settings.STOCKFISH_MULTIPV,
+        threads=settings.STOCKFISH_THREADS,
+        hash_mb=settings.STOCKFISH_HASH_MB,
+    )
+
+
+def _close_worker_engine() -> None:
+    """Best-effort close of the UCI process owned by this worker child."""
+    global _worker_engine
+
+    engine = _worker_engine
+    _worker_engine = None
+    if engine is None:
+        return
+
+    try:
+        engine.quit()
+    except Exception:
+        logger.exception("Could not close worker-owned Stockfish process")
+
+
+def get_worker_engine(
+    wrapper: StockfishEngine | None = None,
+) -> SimpleEngine:
+    """Return this prefork child's live, lazily created Stockfish process."""
+    global _worker_engine
+
+    if _worker_engine is not None:
+        try:
+            _worker_engine.ping()
+        except Exception:
+            logger.warning(
+                "Worker-owned Stockfish process is dead; recreating it",
+                exc_info=True,
+            )
+            _close_worker_engine()
+
+    if _worker_engine is None:
+        owner = wrapper or _stockfish_wrapper()
+        _worker_engine = owner.open_engine()
+
+    return _worker_engine
+
+
+@worker_process_shutdown.connect
+def _shutdown_worker_engine(**_: object) -> None:
+    """Release this prefork child's Stockfish process during warm shutdown."""
+    _close_worker_engine()
 
 
 def _claim_stmt(game_id: int) -> Update:
@@ -141,14 +211,9 @@ def analyze_game(game_id: int) -> None:
         return None
 
     try:
-        engine = StockfishEngine(
-            settings.STOCKFISH_PATH,
-            depth=settings.STOCKFISH_DEPTH,
-            multipv=settings.STOCKFISH_MULTIPV,
-            threads=settings.STOCKFISH_THREADS,
-            hash_mb=settings.STOCKFISH_HASH_MB,
-        )
-        raw_moves = engine.analyse_game(pgn_content)
+        wrapper = _stockfish_wrapper()
+        engine = get_worker_engine(wrapper)
+        raw_moves = wrapper.analyse_game(pgn_content, engine=engine)
         analysis_data = build_analysis_data(raw_moves)
     except Exception as exc:
         logger.exception("analyze_game: analysis failed for game_id=%s", game_id)
@@ -183,8 +248,18 @@ def _mark_report_failed(player_name: str, language: str) -> None:
         )
 
 
-@celery_app.task
-def generate_player_report(player_name: str, language: str) -> None:
+@celery_app.task(
+    bind=True,
+    autoretry_for=(LLMError,),
+    max_retries=REPORT_LLM_MAX_RETRIES,
+    retry_backoff=True,
+    retry_jitter=True,
+)
+def generate_player_report(
+    self: Task,
+    player_name: str,
+    language: str,
+) -> None:
     """Generate a player's scouting report via the LLM and persist it.
 
     Background twin of :func:`analyze_game`, and phased the same way, because
@@ -198,8 +273,9 @@ def generate_player_report(player_name: str, language: str) -> None:
     before enqueueing, so the task only ever writes the outcome. Progress is
     tracked purely through ``PlayerReport.status`` (no Celery result backend).
     Numbers come from :func:`build_report_context`; the model only narrates them.
-    Nothing may crash the worker: *any* exception marks the report ``failed``,
-    otherwise the row would stay ``generating`` until its lease expires.
+    Transient LLM failures get three bounded retries while the atomic report
+    claim remains ``generating``. The final LLM failure and every non-LLM
+    exception mark the row ``failed`` and propagate to Celery.
     """
     logger.info("generate_player_report: starting for player=%s", player_name)
 
@@ -229,13 +305,21 @@ def generate_player_report(player_name: str, language: str) -> None:
                 analyzed_games_count=ctx.analyzed_games_count,
                 last_game_played_at=ctx.last_game_played_at,
             )
+    except LLMError:
+        logger.exception(
+            "generate_player_report: LLM attempt failed for %s",
+            player_name,
+        )
+        if self.request.retries >= REPORT_LLM_MAX_RETRIES:
+            _mark_report_failed(player_name, language)
+        raise
     except Exception:
         logger.exception(
             "generate_player_report: report generation failed for %s",
             player_name,
         )
         _mark_report_failed(player_name, language)
-        return None
+        raise
 
     logger.info(
         "generate_player_report: finished for player=%s (%d analyzed games)",

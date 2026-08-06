@@ -57,7 +57,9 @@ def task_env(monkeypatch):
 
     monkeypatch.setattr(celery_app, "get_sync_db_session", fake_sync_session)
 
-    def _analyse_game(pgn_content: str) -> list[dict]:
+    worker_engine = MagicMock()
+
+    def _analyse_game(pgn_content: str, *, engine) -> list[dict]:
         events.append("engine")
         analysed_pgns.append(pgn_content)
         if state["engine_error"] is not None:
@@ -65,9 +67,11 @@ def task_env(monkeypatch):
         return RAW_MOVES
 
     engine = MagicMock()
+    engine.open_engine.return_value = worker_engine
     engine.analyse_game.side_effect = _analyse_game
     engine_cls = MagicMock(return_value=engine)
     monkeypatch.setattr(celery_app, "StockfishEngine", engine_cls)
+    monkeypatch.setattr(celery_app, "_worker_engine", None)
 
     build_data = MagicMock(return_value=ANALYSIS_DATA)
     monkeypatch.setattr(celery_app, "build_analysis_data", build_data)
@@ -78,7 +82,9 @@ def task_env(monkeypatch):
         statements=statements,
         analysed_pgns=analysed_pgns,
         state=state,
+        engine=engine,
         engine_cls=engine_cls,
+        worker_engine=worker_engine,
         build_data=build_data,
     )
 
@@ -100,13 +106,14 @@ def test_success_sets_completed_and_is_analyzed(task_env):
 
 
 @pytest.mark.unit
-def test_claim_skips_when_not_claimable(task_env):
+def test_engine_created_only_after_successful_claim(task_env):
     """No PGN back from the claim → another worker owns the game; do nothing."""
     task_env.state["claim_result"] = None
 
     assert task_env.module.analyze_game(GAME_ID) is None
 
     task_env.engine_cls.assert_not_called()
+    task_env.engine.open_engine.assert_not_called()
     assert "engine" not in task_env.events
     assert len(task_env.statements) == 1  # the claim attempt only
 
@@ -177,3 +184,71 @@ def test_missing_stockfish_path_does_not_claim(task_env, monkeypatch):
     assert task_env.events == []
     assert task_env.statements == []
     task_env.engine_cls.assert_not_called()
+
+
+@pytest.mark.unit
+def test_task_routes_configured(task_env):
+    assert task_env.module.analyze_game.name == (
+        "app.tasks.celery_app.analyze_game"
+    )
+    assert task_env.module.generate_player_report.name == (
+        "app.tasks.celery_app.generate_player_report"
+    )
+    assert task_env.module.celery_app.conf.task_routes == {
+        "app.tasks.celery_app.analyze_game": {"queue": "analysis"},
+        "app.tasks.celery_app.generate_player_report": {"queue": "reports"},
+    }
+
+
+@pytest.mark.unit
+def test_long_task_delivery_configured(task_env):
+    conf = task_env.module.celery_app.conf
+
+    assert conf.worker_prefetch_multiplier == 1
+    assert conf.task_acks_late is False
+    assert conf.task_reject_on_worker_lost is False
+    assert conf.result_backend is None
+
+
+@pytest.mark.unit
+def test_engine_reused_between_tasks(task_env):
+    task_env.module.analyze_game(GAME_ID)
+    task_env.module.analyze_game(GAME_ID + 1)
+
+    task_env.engine.open_engine.assert_called_once_with()
+    task_env.worker_engine.ping.assert_called_once_with()
+    assert task_env.engine.analyse_game.call_count == 2
+    assert [
+        call.kwargs["engine"] for call in task_env.engine.analyse_game.call_args_list
+    ] == [task_env.worker_engine, task_env.worker_engine]
+
+
+@pytest.mark.unit
+def test_engine_recreated_after_failed_ping(task_env):
+    replacement = MagicMock()
+    task_env.engine.open_engine.side_effect = [
+        task_env.worker_engine,
+        replacement,
+    ]
+
+    task_env.module.analyze_game(GAME_ID)
+    task_env.worker_engine.ping.side_effect = RuntimeError("engine died")
+    task_env.module.analyze_game(GAME_ID + 1)
+
+    task_env.worker_engine.quit.assert_called_once_with()
+    assert task_env.engine.open_engine.call_count == 2
+    second_engine = task_env.engine.analyse_game.call_args_list[1].kwargs["engine"]
+    assert second_engine is replacement
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("quit_error", [None, RuntimeError("quit failed")])
+def test_worker_shutdown_closes_owned_engine(task_env, quit_error):
+    task_env.module._worker_engine = task_env.worker_engine
+    task_env.worker_engine.quit.side_effect = quit_error
+
+    task_env.module._shutdown_worker_engine()
+    task_env.module._shutdown_worker_engine()
+
+    task_env.worker_engine.quit.assert_called_once_with()
+    assert task_env.module._worker_engine is None

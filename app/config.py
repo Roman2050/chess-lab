@@ -21,6 +21,12 @@ GENERIC_HTTP_USER_AGENTS = (
     "wget",
 )
 
+# Report generation makes one initial LLM call plus three retries. Celery's
+# exponential backoff starts at one second, so the maximum non-jittered delay
+# across those retries is 1 + 2 + 4 seconds (jitter can only shorten it).
+REPORT_LLM_MAX_RETRIES = 3
+REPORT_LLM_RETRY_BACKOFF_SECONDS = 1 + 2 + 4
+
 
 class Settings(BaseSettings):
     DB_HOST: str
@@ -77,8 +83,8 @@ class Settings(BaseSettings):
 
     # How long a report may stay `generating` before another request is allowed
     # to reclaim it: a worker killed mid-task leaves nothing behind that could
-    # move the row on. Keep it well above LLM_TIMEOUT — reclaiming a generation
-    # that is still alive costs a duplicate LLM call.
+    # move the row on. It must cover the initial LLM call, three retries and
+    # their backoff — reclaiming a live generation costs a duplicate LLM call.
     REPORT_GENERATION_LEASE_SECONDS: int = Field(default=900, ge=1)
 
     model_config = SettingsConfigDict(
@@ -145,6 +151,15 @@ class Settings(BaseSettings):
         if self.REPORT_LANGUAGE not in self.REPORT_ALLOWED_LANGUAGES:
             raise ValueError(
                 "REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES"
+            )
+        minimum_report_lease = (
+            (REPORT_LLM_MAX_RETRIES + 1) * self.LLM_TIMEOUT
+            + REPORT_LLM_RETRY_BACKOFF_SECONDS
+        )
+        if self.REPORT_GENERATION_LEASE_SECONDS < minimum_report_lease:
+            raise ValueError(
+                "REPORT_GENERATION_LEASE_SECONDS must cover all LLM attempts "
+                f"and retry backoff (minimum {minimum_report_lease})"
             )
         return self
 
