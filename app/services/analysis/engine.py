@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 
 import chess
 import chess.engine
@@ -11,6 +12,8 @@ import chess.pgn
 # simple. This is a contract between engine.py and classifier.py, not a
 # user-facing tuning knob, so it intentionally stays out of Settings.
 _MATE_CP = 10000
+
+logger = logging.getLogger(__name__)
 
 
 def _pov_to_white_cp(pov: chess.engine.PovScore) -> int:
@@ -73,6 +76,19 @@ class StockfishEngine:
         if overrides:
             engine.configure(overrides)
 
+    def open_engine(self) -> chess.engine.SimpleEngine:
+        """Start and configure one UCI process owned by the caller."""
+        engine = chess.engine.SimpleEngine.popen_uci(self._path)
+        try:
+            self._configure_uci_options(engine)
+        except Exception:
+            try:
+                engine.quit()
+            except Exception:
+                logger.exception("Could not close Stockfish after startup failure")
+            raise
+        return engine
+
     def _analyse_position(
         self, engine: chess.engine.SimpleEngine, board: chess.Board
     ) -> tuple[int, str | None, int | None]:
@@ -105,7 +121,12 @@ class StockfishEngine:
 
         return eval_cp, best_move_uci, second_eval_cp
 
-    def analyse_game(self, pgn_content: str) -> list[dict]:
+    def analyse_game(
+        self,
+        pgn_content: str,
+        *,
+        engine: chess.engine.SimpleEngine | None = None,
+    ) -> list[dict]:
         """Analyse every game position once and return per-move evaluations."""
         game = chess.pgn.read_game(io.StringIO(pgn_content))
         if game is None:
@@ -116,37 +137,50 @@ class StockfishEngine:
         if not moves:
             return []
 
-        out: list[dict] = []
+        if engine is not None:
+            return self._analyse_moves(engine, board, moves)
 
-        with chess.engine.SimpleEngine.popen_uci(self._path) as engine:
-            self._configure_uci_options(engine)
+        owned_engine = self.open_engine()
+        try:
+            return self._analyse_moves(owned_engine, board, moves)
+        finally:
+            owned_engine.quit()
+
+    def _analyse_moves(
+        self,
+        engine: chess.engine.SimpleEngine,
+        board: chess.Board,
+        moves: list[chess.Move],
+    ) -> list[dict]:
+        """Analyse parsed moves with an engine whose lifecycle is managed elsewhere."""
+        out: list[dict] = []
+        current_eval, current_best, current_second = self._analyse_position(
+            engine, board
+        )
+
+        for ply, move in enumerate(moves, start=1):
+            eval_before = current_eval
+            best_move_uci = current_best
+            second_eval_cp = current_second
+            side = board.turn
+            color = "White" if side == chess.WHITE else "Black"
+            san = board.san(move)
+
+            board.push(move)
             current_eval, current_best, current_second = self._analyse_position(
                 engine, board
             )
 
-            for ply, move in enumerate(moves, start=1):
-                eval_before = current_eval
-                best_move_uci = current_best
-                second_eval_cp = current_second
-                side = board.turn
-                color = "White" if side == chess.WHITE else "Black"
-                san = board.san(move)
-
-                board.push(move)
-                current_eval, current_best, current_second = self._analyse_position(
-                    engine, board
-                )
-
-                out.append(
-                    {
-                        "ply": ply,
-                        "san": san,
-                        "color": color,
-                        "eval_before": eval_before,
-                        "eval_after": current_eval,
-                        "best_move": best_move_uci,
-                        "second_eval_cp": second_eval_cp,
-                    }
-                )
+            out.append(
+                {
+                    "ply": ply,
+                    "san": san,
+                    "color": color,
+                    "eval_before": eval_before,
+                    "eval_after": current_eval,
+                    "best_move": best_move_uci,
+                    "second_eval_cp": second_eval_cp,
+                }
+            )
 
         return out

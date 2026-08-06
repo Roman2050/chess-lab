@@ -85,11 +85,25 @@ required only to generate reports.
    uv run uvicorn app.main:app --reload
    ```
 
-4. In another terminal, start the worker for analysis and report jobs:
+4. In two terminals, start dedicated workers for analysis and report jobs:
 
    ```bash
-   uv run celery -A app.tasks.celery_app.celery_app worker --loglevel=info
+   uv run celery -A app.tasks.celery_app.celery_app worker -Q analysis --concurrency=1 --loglevel=info
+   uv run celery -A app.tasks.celery_app.celery_app worker -Q reports --concurrency=1 --loglevel=info
    ```
+
+   The MVP production defaults are `analysis=1` and `reports=1`. Deployment uses
+   separate prefork workers; on Windows local development, append `--pool=solo` to
+   each command. Keep analysis capacity within both resource budgets:
+
+   ```text
+   analysis concurrency × STOCKFISH_THREADS <= available CPU cores
+   analysis concurrency × STOCKFISH_HASH_MB <= Stockfish RAM budget
+   ```
+
+   Analysis uses early acknowledgement intentionally. A normal exception records
+   `failed`, but a killed worker can leave a stale `running` row until controlled
+   operator recovery; automatic leases/reaping are outside the MVP.
 
 ## Example API workflow
 

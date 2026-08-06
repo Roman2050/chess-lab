@@ -1,7 +1,12 @@
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from app.config import Settings, settings as application_settings
+from app.config import (
+    REPORT_LLM_MAX_RETRIES,
+    REPORT_LLM_RETRY_BACKOFF_SECONDS,
+    Settings,
+    settings as application_settings,
+)
 
 
 BASE_SETTINGS = {
@@ -243,3 +248,30 @@ def test_report_language_must_be_in_case_sensitive_allowed_set() -> None:
             REPORT_ALLOWED_LANGUAGES="en,uk",
             _env_file=None,
         )
+
+
+@pytest.mark.unit
+def test_report_lease_covers_all_llm_attempts_and_backoff() -> None:
+    llm_timeout = 120
+    minimum_lease = (
+        (REPORT_LLM_MAX_RETRIES + 1) * llm_timeout
+        + REPORT_LLM_RETRY_BACKOFF_SECONDS
+    )
+
+    with pytest.raises(ValidationError, match=f"minimum {minimum_lease}"):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            LLM_TIMEOUT=llm_timeout,
+            REPORT_GENERATION_LEASE_SECONDS=minimum_lease - 1,
+            _env_file=None,
+        )
+
+    settings = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        LLM_TIMEOUT=llm_timeout,
+        REPORT_GENERATION_LEASE_SECONDS=minimum_lease,
+        _env_file=None,
+    )
+    assert settings.REPORT_GENERATION_LEASE_SECONDS == minimum_lease
