@@ -77,7 +77,7 @@ skill buckets are `strong <= 2.5`, `solid <= 4.0`, `inconsistent <= 6.0`, and
 
 **3.7 Read-Side Column Loading (Phase 7)**
 `games` carries two heavy columns — `pgn_content` and `analysis_data` (§5.1) — and a read
-path must load neither unless it actually uses it. `GET /games` selects only the columns
+path must load neither unless it actually uses it. `GET /api/v1/games` selects only the columns
 `GameSummary` serializes; the aggregation fetches keep `analysis_data` (every metric is
 derived from it) and drop `pgn_content`. Both are expressed as
 `load_only(..., raiseload=True)`: `raiseload` turns an accidental access into an immediate
@@ -147,7 +147,7 @@ optional server-side bearer token. `LICHESS_USER_AGENT` is required at startup a
 generic HTTP-library identities are rejected; `LICHESS_API_TOKEN` is a `SecretStr`
 and a blank value means no token.
 
-The existing `/api/games/user/{username}` endpoint, query parameters, and successful
+The `/api/v1/games/lichess/{username}` endpoint, query parameters, and successful
 `UploadResponse` stay unchanged. Redirects are not followed. The entire outbound
 operation is bounded by `LICHESS_TOTAL_TIMEOUT_SECONDS`, and a streaming read enforces
 `LICHESS_MAX_RESPONSE_BYTES` against both declared `Content-Length` and the actual
@@ -231,6 +231,23 @@ at least `4 × LLM_TIMEOUT + 7` seconds, covering four calls plus the maximum
 one-, two-, and four-second backoffs. Initial queue wait remains unbounded, so the
 separate reports queue requires backlog/oldest-message monitoring in Phase 8; the
 lease is not an exactly-once or task-ownership guarantee.
+
+**3.16 Public API, Demo Discovery, and CORS (Phase 8)**
+All business routers are mounted once under `API_V1_PREFIX = "/api/v1"`; `/`,
+`/health`, `/ready`, `/docs`, `/redoc`, and `/openapi.json` remain unversioned.
+There are no redirects or aliases for the former unversioned business paths.
+
+`GET /` returns typed public service metadata without database or external calls.
+`GET /api/v1/demo` builds typed read-only links from the configured stable
+`DEMO_PLAYER_NAME` and the report-language allowlist; it neither enumerates players
+nor validates every link per request. Production demo data is pseudonymized before
+ingestion, so the API does not mask identities dynamically.
+
+`CORS_ALLOWED_ORIGINS` is parsed once as an exact-origin tuple. A separate frontend
+deployment requires a non-empty allowlist. CORS permits only `GET`/`POST` and the
+browser headers needed by the public flow, without credentials or wildcards.
+`MVP_API_KEY` remains an operator-only server-side secret and must never be embedded
+in a browser frontend.
 
 ---
 
@@ -361,7 +378,8 @@ Both fields are written in the same transaction (Section 7, phase C). `is_analyz
 stays because the whole read side depends on it (aggregations, reports, progress);
 `analysis_status` exists to make execution *claimable*, which a boolean cannot express.
 A game is claimable by a worker from `pending` or `failed` only
-(`ANALYSIS_STATUS_CLAIMABLE` in `app/models/db.py`) — `POST /analyze/player/{username}`
+(`ANALYSIS_STATUS_CLAIMABLE` in `app/models/db.py`) —
+`POST /api/v1/analyze/player/{username}`
 selects exactly that set, so games already `running` are never re-enqueued.
 
 There is no lease reaper: a worker killed mid-analysis leaves the row `running`, and
@@ -392,7 +410,8 @@ class PlayerReport(Base):
 
 The unique expression index makes report identity case-insensitive without changing
 the stored display value. `generating` doubles as the claim: the row is flipped by
-`POST /report` *before* the task is enqueued, and only the worker moves it on to
+`POST /api/v1/report/{username}` *before* the task is enqueued, and only the worker
+moves it on to
 `ready` / `failed`. Because a killed worker leaves nothing behind that could finish
 the job, `generating` carries a lease — a row untouched for
 `REPORT_GENERATION_LEASE_SECONDS` (default 900 and validated against the complete
@@ -469,16 +488,18 @@ read-side from them — no extra fields and no schema change are required.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/games/lichess/{username}` | Fetch a bounded PGN export through the identified Lichess client, parse, save |
-| `POST` | `/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB or `MAX_UPLOAD_GAMES`, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
-| `GET` | `/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
-| `GET` | `/games/{game_id}` | Full game detail including pgn_content |
-| `POST` | `/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
-| `GET` | `/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
-| `GET` | `/games/stats/{player_name}/openings` | Per-opening statistics (win-rate + ACPL + live-position `wp_loss_in_opening`) |
-| `GET` | `/games/stats/{player_name}/moves` | Accuracy by move number (`avg_cp_loss` + live-position `avg_wp_loss`) |
-| `POST` | `/analyze/player/{username}` | Enqueue up to `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable games, ordered by id |
-| `GET` | `/analyze/player/{username}/status` | Read analysis progress for a player |
+| `GET` | `/` | Public service metadata and links; no database or external calls |
+| `GET` | `/api/v1/demo` | Read-only demo player discovery and versioned endpoint links |
+| `POST` | `/api/v1/games/lichess/{username}` | Fetch a bounded PGN export through the identified Lichess client, parse, save |
+| `POST` | `/api/v1/games/upload` | Upload a `.pgn` file, parse, save; 413 over 20 MB or `MAX_UPLOAD_GAMES`, 400 on missing filename / non-`.pgn` / non-UTF-8 (§3.8) |
+| `GET` | `/api/v1/games` | Paginated list with filters (player_name, winner, sort); summary columns only, no PGN / analysis payload (§3.7) |
+| `GET` | `/api/v1/games/{game_id}` | Full game detail including pgn_content |
+| `POST` | `/api/v1/games/{game_id}/analyze` | Enqueue Stockfish analysis for one game |
+| `GET` | `/api/v1/games/stats/{player_name}` | Aggregated player stats: ACPL, accuracy by phase, error patterns |
+| `GET` | `/api/v1/games/stats/{player_name}/openings` | Per-opening statistics (win-rate + ACPL + live-position `wp_loss_in_opening`) |
+| `GET` | `/api/v1/games/stats/{player_name}/moves` | Accuracy by move number (`avg_cp_loss` + live-position `avg_wp_loss`) |
+| `POST` | `/api/v1/analyze/player/{username}` | Enqueue up to `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable games, ordered by id |
+| `GET` | `/api/v1/analyze/player/{username}/status` | Read analysis progress for a player |
 | `GET` | `/health` | Health check |
 | `GET` | `/ready` | Readiness check; 503 when Redis quota/coordination availability is unavailable; never calls Lichess |
 
@@ -486,13 +507,13 @@ Every endpoint parameter that identifies a player is case-insensitive on the
 database read side (§3.9); response shapes and the requested display spelling are
 unchanged.
 
-**Planned endpoints (Phase 5):**
+**Report endpoints:**
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/report/{username}` | Decide & enqueue report generation (202) or report why not (200): up-to-date / not enough analyzed games |
-| `GET` | `/report/{username}` | Return the cached report text (404 if none yet); flags `is_stale` |
-| `GET` | `/report/{username}/status` | Generation state: none / generating / ready / failed |
+| `POST` | `/api/v1/report/{username}` | Decide & enqueue report generation (202) or report why not (200): up-to-date / not enough analyzed games |
+| `GET` | `/api/v1/report/{username}` | Return the cached report text (404 if none yet); flags `is_stale` |
+| `GET` | `/api/v1/report/{username}/status` | Generation state: none / generating / ready / failed |
 
 All three accept `?language=` (default `REPORT_LANGUAGE`, currently `en`) and reject
 values outside the case-sensitive `REPORT_ALLOWED_LANGUAGES` allowlist with 422. The
@@ -542,7 +563,8 @@ The claim, not the read-then-check in the router, is what makes the task idempot
 `UPDATE ... WHERE status IN (...) RETURNING` is a single statement, so two workers
 racing for the same game cannot both win — under READ COMMITTED the loser blocks on
 the row lock and re-evaluates the predicate after the winner commits, matching zero
-rows. `POST /games/{game_id}/analyze` still rejects an already-analyzed game with 400,
+rows. `POST /api/v1/games/{game_id}/analyze` still rejects an already-analyzed game
+with 400,
 but only as a fast, non-authoritative check.
 
 ### 7.1 Report Generation Flow
@@ -552,7 +574,7 @@ deterministically in code (Phase 4 aggregations + derived `insights`); the model
 phrases the supplied facts in prose. It never queries the DB and never invents data.
 
 ```
-POST /report/{username}?language=en
+POST /api/v1/report/{username}?language=en
         ↓
   count_analyzed_games + get_report + lease check   (async reads)
         ↓
@@ -746,4 +768,9 @@ REPORT_LANGUAGE=en                       # default report language
 REPORT_ALLOWED_LANGUAGES=en,uk           # case-sensitive comma-separated allowlist
 REPORT_REFRESH_THRESHOLD=20              # new analyzed games needed to regenerate
 REPORT_GENERATION_LEASE_SECONDS=900      # must be >= 4 * LLM_TIMEOUT + 7
+
+# Public discovery and exact browser-origin allowlist (Phase 8)
+DEMO_PLAYER_NAME=DemoPlayer
+CORS_ALLOWED_ORIGINS=
+FRONTEND_DEPLOYMENT_ENABLED=false
 ```

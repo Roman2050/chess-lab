@@ -156,7 +156,7 @@ keys, complete request URLs/queries, PGN, or upstream bodies.
    read -rsp "Chess Lab API key: " CHESS_LAB_OPERATOR_KEY; echo
    curl --fail-with-body -X POST \
      -H "X-API-Key: $CHESS_LAB_OPERATOR_KEY" \
-     "$CHESS_LAB_BASE_URL/games/lichess/$LICHESS_SMOKE_USERNAME?max_games=1"
+     "$CHESS_LAB_BASE_URL/api/v1/games/lichess/$LICHESS_SMOKE_USERNAME?max_games=1"
    unset CHESS_LAB_OPERATOR_KEY CHESS_LAB_BASE_URL LICHESS_SMOKE_USERNAME
    ```
 
