@@ -227,6 +227,55 @@ def test_report_allowed_languages_are_trimmed_and_parsed_once() -> None:
 
 
 @pytest.mark.unit
+def test_cors_origins_are_parsed_once_and_may_be_empty_locally() -> None:
+    configured = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        CORS_ALLOWED_ORIGINS=" https://app.example, http://localhost:5173 ",
+        _env_file=None,
+    )
+    local = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        CORS_ALLOWED_ORIGINS="",
+        _env_file=None,
+    )
+
+    assert configured.CORS_ALLOWED_ORIGINS == (
+        "https://app.example",
+        "http://localhost:5173",
+    )
+    assert local.CORS_ALLOWED_ORIGINS == ()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "origin",
+    ["*", "https://app.example/", "https://app.example/path", "app.example"],
+)
+def test_cors_origins_must_be_exact_http_origins(origin: str) -> None:
+    with pytest.raises(ValidationError, match="exact http"):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            CORS_ALLOWED_ORIGINS=origin,
+            _env_file=None,
+        )
+
+
+@pytest.mark.unit
+def test_frontend_deployment_requires_a_cors_origin() -> None:
+    with pytest.raises(ValidationError, match="must not be empty"):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            FRONTEND_DEPLOYMENT_ENABLED=True,
+            CORS_ALLOWED_ORIGINS="",
+            _env_file=None,
+        )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("allowed_languages", ["", "en,,uk", "en, "])
 def test_report_allowed_languages_reject_empty_items(allowed_languages) -> None:
     with pytest.raises(ValidationError, match="must not contain empty items"):

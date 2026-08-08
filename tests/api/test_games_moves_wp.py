@@ -48,7 +48,7 @@ async def test_moves_endpoint_exposes_avg_wp_loss(api_client, monkeypatch) -> No
         "app.routers.games.get_accuracy_by_move_number", _fake_rows
     )
 
-    resp = await api_client.get("/games/stats/hero/moves")
+    resp = await api_client.get("/api/v1/games/stats/hero/moves")
 
     assert resp.status_code == 200
     row = resp.json()[0]
