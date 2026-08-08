@@ -21,6 +21,8 @@ os.environ["LICHESS_USER_AGENT"] = TEST_LICHESS_USER_AGENT
 os.environ["LICHESS_API_TOKEN"] = ""
 os.environ["LICHESS_MIN_COOLDOWN_SECONDS"] = "60"
 os.environ["LICHESS_MAX_COOLDOWN_SECONDS"] = "3600"
+os.environ["DEMO_PLAYER_NAME"] = "DemoPlayer"
+os.environ["CORS_ALLOWED_ORIGINS"] = "https://frontend.example"
 
 
 @pytest.fixture(autouse=True)
