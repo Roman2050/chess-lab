@@ -13,13 +13,33 @@ from app.services.analysis_queue import (
 )
 from app.tasks.celery_app import analyze_game
 
-router = APIRouter(prefix="/analyze", tags=["Analysis"])
+router = APIRouter(prefix="/analyze")
+
+OPERATOR_ERROR_RESPONSES = {
+    401: {"description": "Missing or invalid operator API key."},
+    429: {
+        "description": "Analysis quota exhausted. Retry after the seconds in `Retry-After`."
+    },
+    503: {"description": "The quota backend is unavailable."},
+}
 
 
 @router.post(
     "/player/{username}",
     response_model=BatchAnalysisResponse,
     dependencies=[Depends(require_analysis_quota)],
+    tags=["Analysis"],
+    summary="Queue a player's pending analyses",
+    description=(
+        "**Operator-only.** Queue at most `MAX_ANALYSIS_TASKS_PER_REQUEST` claimable "
+        "games in stable ID order. Each game becomes a separate Celery task. Poll "
+        "the status endpoint; PostgreSQL, not a Celery result backend, is authoritative."
+    ),
+    response_description="Player identity and number of game tasks queued.",
+    responses={
+        **OPERATOR_ERROR_RESPONSES,
+        404: {"description": "The player has no claimable games."},
+    },
 )
 async def enqueue_player_analysis(
     username: str,
@@ -54,7 +74,18 @@ async def enqueue_player_analysis(
     )
 
 
-@router.get("/player/{username}/status", response_model=AnalysisProgress)
+@router.get(
+    "/player/{username}/status",
+    response_model=AnalysisProgress,
+    tags=["Analysis"],
+    summary="Read a player's analysis progress",
+    description=(
+        "**Public read.** Return database-backed total, analyzed, and pending game "
+        "counts. Use this endpoint to poll after an operator queues analysis."
+    ),
+    response_description="Current analysis progress for the player.",
+    responses={404: {"description": "Player not found."}},
+)
 async def get_player_analysis_status(
     username: str,
     db: AsyncSession = Depends(get_async_db),

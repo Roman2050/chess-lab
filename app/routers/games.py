@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import get_async_db
 from app.models.db import Game
 from app.models.enums import StandardPerfType
+from app.schemas.analysis import AnalysisQueueResponse
 from app.schemas.games import GameDetail, PaginatedGames, SortOrder, UploadResponse
 from app.schemas.stats import (
     MoveAccuracyStat,
@@ -45,12 +46,34 @@ from app.utils.parser import parse_pgn_text
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
-router = APIRouter(prefix="/games", tags=["Games Integration"])
+router = APIRouter(prefix="/games")
+
+OPERATOR_ERROR_RESPONSES = {
+    401: {"description": "Missing or invalid operator API key."},
+    429: {
+        "description": "Operation quota exhausted. Retry after the number of seconds in `Retry-After`."
+    },
+    503: {"description": "A required coordination or queue service is unavailable."},
+}
 
 @router.post(
     "/lichess/{username}",
     response_model=UploadResponse,
     dependencies=[Depends(require_lichess_import_quota)],
+    tags=["Operator Imports"],
+    summary="Import a player's Lichess games",
+    description=(
+        "**Operator-only.** Fetch and persist a bounded Lichess PGN export. Only one "
+        "Lichess request may run across the deployment at a time. The endpoint does "
+        "not retry upstream failures; honor `Retry-After` on `429`."
+    ),
+    response_description="Import outcome and number of games persisted.",
+    responses={
+        **OPERATOR_ERROR_RESPONSES,
+        404: {"description": "The Lichess user does not exist."},
+        409: {"description": "Another deployment-wide Lichess import is active."},
+        502: {"description": "Lichess returned an invalid or unsupported response."},
+    },
 )
 async def load_from_lichess(
     username: str, 
@@ -120,6 +143,19 @@ async def load_from_lichess(
     "/upload",
     response_model=UploadResponse,
     dependencies=[Depends(require_pgn_upload_quota)],
+    tags=["Operator Imports"],
+    summary="Upload a PGN file",
+    description=(
+        "**Operator-only.** Parse and persist standard games from one UTF-8 `.pgn` "
+        "file. The upload is limited to 20 MB and `MAX_UPLOAD_GAMES`; duplicate "
+        "games are ignored by their stable identifier."
+    ),
+    response_description="Upload outcome and number of games persisted.",
+    responses={
+        **OPERATOR_ERROR_RESPONSES,
+        400: {"description": "Missing filename, wrong extension, unreadable file, or invalid UTF-8."},
+        413: {"description": "The byte-size or parsed-game limit was exceeded."},
+    },
 )
 async def upload_pgn_file(
     file: UploadFile = File(...), 
@@ -174,7 +210,17 @@ async def upload_pgn_file(
         stats=stats
     )
 
-@router.get("", response_model=PaginatedGames)
+@router.get(
+    "",
+    response_model=PaginatedGames,
+    tags=["Games"],
+    summary="List imported games",
+    description=(
+        "**Public read.** Return a filtered page of lightweight game summaries. "
+        "The list intentionally excludes PGN text and analysis payloads."
+    ),
+    response_description="A page of game summaries and pagination metadata.",
+)
 async def get_games_list(
     limit: int = Query(50, ge=1, le=100, description="Number of games on the page"),
     offset: int = Query(0, ge=0, description="Skip elements (for pages)"),
@@ -195,7 +241,18 @@ async def get_games_list(
         items=games # SQLAlchemy models will be automatically converted to GameSummary
     )
 
-@router.get("/{game_id}", response_model=GameDetail)
+@router.get(
+    "/{game_id}",
+    response_model=GameDetail,
+    tags=["Games"],
+    summary="Read one game",
+    description=(
+        "**Public read.** Return full stored game details, including clean PGN and "
+        "the analysis payload when analysis has completed."
+    ),
+    response_description="The requested game and its available analysis data.",
+    responses={404: {"description": "Game not found."}},
+)
 async def get_game_by_id(
     game_id: int, 
     db: AsyncSession = Depends(get_async_db)
@@ -211,7 +268,21 @@ async def get_game_by_id(
 
 @router.post(
     "/{game_id}/analyze",
+    response_model=AnalysisQueueResponse,
     dependencies=[Depends(require_analysis_quota)],
+    tags=["Analysis"],
+    summary="Queue analysis for one game",
+    description=(
+        "**Operator-only.** Publish one Stockfish analysis task to the Celery "
+        "`analysis` queue. Work continues asynchronously; poll the player's analysis "
+        "status endpoint for database-backed progress."
+    ),
+    response_description="Confirmation that the game was queued.",
+    responses={
+        **OPERATOR_ERROR_RESPONSES,
+        400: {"description": "The game has already been analyzed."},
+        404: {"description": "Game not found."},
+    },
 )
 async def enqueue_game_analysis(
     game_id: int,
@@ -240,7 +311,18 @@ async def enqueue_game_analysis(
     return {"status": "queued", "game_id": game_id}
 
 
-@router.get("/stats/{player_name}", response_model=PlayerStats)
+@router.get(
+    "/stats/{player_name}",
+    response_model=PlayerStats,
+    tags=["Player Statistics"],
+    summary="Read a player's aggregate statistics",
+    description=(
+        "**Public read.** Compute deterministic ACPL, phase accuracy, and error "
+        "patterns from the player's analyzed games. Player matching is case-insensitive."
+    ),
+    response_description="Aggregate move-quality and error-pattern statistics.",
+    responses={404: {"description": "No analyzed games were found for the player."}},
+)
 async def get_player_stats(
     player_name: str,
     time_control: str | None = None,
@@ -273,7 +355,18 @@ async def get_player_stats(
     )
 
 
-@router.get("/stats/{player_name}/openings", response_model=list[OpeningStat])
+@router.get(
+    "/stats/{player_name}/openings",
+    response_model=list[OpeningStat],
+    tags=["Player Statistics"],
+    summary="Read a player's opening statistics",
+    description=(
+        "**Public read.** Return the most-played openings with results, opening ACPL, "
+        "and live-position win-probability loss."
+    ),
+    response_description="Opening statistics ordered by game count.",
+    responses={404: {"description": "No games were found for the player."}},
+)
 async def get_player_opening_stats(
     player_name: str,
     limit: int = Query(10, ge=1, le=100),
@@ -290,7 +383,18 @@ async def get_player_opening_stats(
     return rows
 
 
-@router.get("/stats/{player_name}/moves", response_model=list[MoveAccuracyStat])
+@router.get(
+    "/stats/{player_name}/moves",
+    response_model=list[MoveAccuracyStat],
+    tags=["Player Statistics"],
+    summary="Read accuracy by move number",
+    description=(
+        "**Public read.** Aggregate centipawn and win-probability loss by move number, "
+        "retaining only moves reached in at least `min_games` games."
+    ),
+    response_description="Per-move-number accuracy and error rates.",
+    responses={404: {"description": "No qualifying analyzed games were found."}},
+)
 async def get_player_move_stats(
     player_name: str,
     min_games: int = Query(5, ge=1, le=100),

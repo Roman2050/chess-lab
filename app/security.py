@@ -16,7 +16,10 @@ mvp_api_key_header = APIKeyHeader(
     name="X-API-Key",
     auto_error=False,
     scheme_name="MVPApiKey",
-    description="Single-operator key required for write operations.",
+    description=(
+        "Server-side key for the single Chess Lab operator. It protects every write "
+        "operation and is never issued to demo users or embedded in a browser client."
+    ),
 )
 
 

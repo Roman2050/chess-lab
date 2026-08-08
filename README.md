@@ -1,8 +1,11 @@
 # Chess Lab
 
-Chess Lab is a backend for importing a player's chess history, running bounded
-Stockfish analysis, aggregating recurring weaknesses, and generating a concise
-training report.
+Bulk chess game analysis and opponent scouting with Stockfish-backed insights.
+
+Chess Lab imports a player's game history, runs bounded Stockfish analysis,
+aggregates recurring weaknesses, and generates a concise training report. Current
+API/package version: **0.1.0**. Maintainer: [Roman](https://github.com/Roman2050).
+The canonical repository is [Roman2050/chess-lab](https://github.com/Roman2050/chess-lab).
 
 ## Demo and API examples
 

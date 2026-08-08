@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.schemas.stats import ErrorPatterns, OpeningStat, PhaseStats, WpLossStats
 
@@ -55,6 +55,22 @@ class ReportRequestResponse(BaseModel):
     report_games_count: int | None  # snapshot of an existing report (None if absent)
     games_until_next_report: int | None  # how many more analyzed games until refresh
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "player": "DemoPlayer",
+                    "language": "en",
+                    "action": "up_to_date",
+                    "message": "Report is up to date",
+                    "current_analyzed_games_count": 24,
+                    "report_games_count": 20,
+                    "games_until_next_report": 16,
+                }
+            ]
+        }
+    )
+
 
 class ReportResponse(BaseModel):
     """Response to ``GET /api/v1/report/{username}`` — cached text + freshness."""
@@ -70,6 +86,28 @@ class ReportResponse(BaseModel):
     updated_at: datetime
     last_game_played_at: datetime | None
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "player": "DemoPlayer",
+                    "language": "en",
+                    "report_text": (
+                        "DemoPlayer is most consistent in the opening and should "
+                        "prioritize middlegame calculation training."
+                    ),
+                    "status": "ready",
+                    "analyzed_games_count": 24,
+                    "current_analyzed_games_count": 24,
+                    "is_stale": False,
+                    "created_at": "2026-01-16T10:00:00Z",
+                    "updated_at": "2026-01-16T10:02:30Z",
+                    "last_game_played_at": "2026-01-15T00:00:00Z",
+                }
+            ]
+        }
+    )
+
 
 class ReportStatusResponse(BaseModel):
     """Response to ``GET /api/v1/report/{username}/status`` — state only."""
@@ -81,3 +119,19 @@ class ReportStatusResponse(BaseModel):
     analyzed_games_count: int | None
     current_analyzed_games_count: int
     games_until_next_report: int | None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "player": "DemoPlayer",
+                    "language": "en",
+                    "status": "ready",
+                    "has_report": True,
+                    "analyzed_games_count": 24,
+                    "current_analyzed_games_count": 24,
+                    "games_until_next_report": 20,
+                }
+            ]
+        }
+    )

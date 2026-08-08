@@ -24,7 +24,18 @@ from app.tasks.celery_app import generate_player_report
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/report", tags=["Report"])
+router = APIRouter(prefix="/report")
+
+REPORT_LANGUAGE_RESPONSE = {
+    422: {"description": "The language is not in `REPORT_ALLOWED_LANGUAGES`."}
+}
+OPERATOR_ERROR_RESPONSES = {
+    401: {"description": "Missing or invalid operator API key."},
+    429: {
+        "description": "Report quota exhausted. Retry after the seconds in `Retry-After`."
+    },
+    503: {"description": "The quota backend or report queue is unavailable."},
+}
 
 
 def require_allowed_report_language(
@@ -43,6 +54,20 @@ def require_allowed_report_language(
     "/{username}",
     response_model=ReportRequestResponse,
     dependencies=[Depends(require_report_quota)],
+    tags=["Reports"],
+    summary="Request a scouting report",
+    description=(
+        "**Operator-only.** Decide whether a cached report needs generation or "
+        "refresh. A new/background generation returns `202`; poll the report status, "
+        "then use the public `GET` endpoint. Up-to-date or insufficient-data decisions "
+        "return `200` without enqueueing work."
+    ),
+    response_description="Generation decision and cache-refresh counters.",
+    responses={
+        **OPERATOR_ERROR_RESPONSES,
+        **REPORT_LANGUAGE_RESPONSE,
+        202: {"description": "Report generation was queued or is already running."},
+    },
 )
 async def request_report(
     username: str,
@@ -122,7 +147,22 @@ async def request_report(
     )
 
 
-@router.get("/{username}", response_model=ReportResponse)
+@router.get(
+    "/{username}",
+    response_model=ReportResponse,
+    tags=["Reports"],
+    summary="Read a cached scouting report",
+    description=(
+        "**Public read.** Return the latest cached one-shot report and freshness "
+        "metadata. The LLM narrates deterministic facts computed by Chess Lab; it "
+        "does not perform the chess analysis."
+    ),
+    response_description="Cached narrative report and freshness metadata.",
+    responses={
+        **REPORT_LANGUAGE_RESPONSE,
+        404: {"description": "No cached report exists for this player and language."},
+    },
+)
 async def read_report(
     username: str,
     language: str = Depends(require_allowed_report_language),
@@ -155,7 +195,18 @@ async def read_report(
     )
 
 
-@router.get("/{username}/status", response_model=ReportStatusResponse)
+@router.get(
+    "/{username}/status",
+    response_model=ReportStatusResponse,
+    tags=["Reports"],
+    summary="Read report generation status",
+    description=(
+        "**Public read.** Poll the database-backed report state without transferring "
+        "the potentially large report text."
+    ),
+    response_description="Current report state and refresh counters.",
+    responses=REPORT_LANGUAGE_RESPONSE,
+)
 async def read_report_status(
     username: str,
     language: str = Depends(require_allowed_report_language),
