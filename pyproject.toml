@@ -1,7 +1,7 @@
 [project]
 name = "chess-lab"
 version = "0.1.0"
-description = "Add your description here"
+description = "Bulk chess game analysis and opponent scouting with Stockfish-backed insights."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,6 +19,12 @@ dependencies = [
     "sqlalchemy>=2.0.49",
     "uvicorn>=0.45.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Roman2050/chess-lab"
+Repository = "https://github.com/Roman2050/chess-lab"
+Documentation = "https://github.com/Roman2050/chess-lab#readme"
+Architecture = "https://github.com/Roman2050/chess-lab/blob/main/ARCHITECTURE.md"
 
 [build-system]
 requires = ["hatchling"]
