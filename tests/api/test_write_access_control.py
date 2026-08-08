@@ -184,7 +184,11 @@ async def test_openapi_marks_only_post_operations_as_protected(access_client):
     schema = response.json()
     assert schema["components"]["securitySchemes"]["MVPApiKey"] == {
         "type": "apiKey",
-        "description": "Single-operator key required for write operations.",
+        "description": (
+            "Server-side key for the single Chess Lab operator. It protects every "
+            "write operation and is never issued to demo users or embedded in a "
+            "browser client."
+        ),
         "in": "header",
         "name": "X-API-Key",
     }

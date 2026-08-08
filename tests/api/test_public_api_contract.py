@@ -1,6 +1,21 @@
+from pathlib import Path
+import tomllib
+
 import pytest
 
 from app.config import API_V1_PREFIX, settings
+from app.main import (
+    APP_DESCRIPTION,
+    APP_NAME,
+    APP_SUMMARY,
+    APP_VERSION,
+    CONTACT_URL,
+    OPENAPI_TAGS,
+    REPOSITORY_URL,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.unit
@@ -11,7 +26,7 @@ async def test_service_index_is_public_stable_and_secret_free(async_client) -> N
     assert response.status_code == 200
     assert response.json() == {
         "name": "Chess Lab API",
-        "description": "Chess game analysis and opponent scouting backend",
+        "description": APP_SUMMARY,
         "version": "0.1.0",
         "links": {
             "docs": "/docs",
@@ -67,6 +82,120 @@ async def test_only_business_routes_are_versioned(async_client) -> None:
 
     for path in ("/", "/health", "/ready", "/docs", "/openapi.json"):
         assert path in paths or (await async_client.get(path)).status_code == 200
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_openapi_metadata_is_ordered_real_and_secret_free(async_client) -> None:
+    response = await async_client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    assert schema["info"] == {
+        "title": APP_NAME,
+        "summary": APP_SUMMARY,
+        "description": APP_DESCRIPTION,
+        "contact": {"name": "Roman", "url": CONTACT_URL},
+        "version": APP_VERSION,
+    }
+    assert schema["tags"] == OPENAPI_TAGS
+
+    serialized = response.text
+    assert "Add your description here" not in serialized
+    assert "example.invalid" not in serialized
+    assert settings.MVP_API_KEY.get_secret_value() not in serialized
+    assert settings.LICHESS_API_TOKEN is None or (
+        settings.LICHESS_API_TOKEN.get_secret_value() not in serialized
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_openapi_operations_are_documented_and_grouped(async_client) -> None:
+    schema = (await async_client.get("/openapi.json")).json()
+    expected_tags = {
+        "Demo",
+        "Games",
+        "Player Statistics",
+        "Analysis",
+        "Reports",
+        "Operator Imports",
+        "Service Health",
+    }
+
+    actual_tags = set()
+    for path, path_item in schema["paths"].items():
+        for method in ("get", "post"):
+            operation = path_item.get(method)
+            if operation is None:
+                continue
+            actual_tags.update(operation["tags"])
+            assert operation["summary"]
+            assert operation["description"]
+            assert operation["responses"]["200"]["description"]
+
+    assert actual_tags == expected_tags
+    assert schema["paths"]["/api/v1/report/{username}"]["post"]["responses"][
+        "202"
+    ]["description"]
+    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"][
+        "responses"
+    ]["409"]["description"]
+    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"][
+        "responses"
+    ]["429"]["description"].startswith("Operation quota exhausted")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_openapi_response_schemas_have_safe_examples(async_client) -> None:
+    schemas = (await async_client.get("/openapi.json")).json()["components"]["schemas"]
+
+    for name in (
+        "AnalysisProgress",
+        "BatchAnalysisResponse",
+        "DemoDiscovery",
+        "GameDetail",
+        "GameSummary",
+        "HealthStatus",
+        "MoveAccuracyStat",
+        "OpeningStat",
+        "PaginatedGames",
+        "PlayerStats",
+        "ReadinessStatus",
+        "ReportRequestResponse",
+        "ReportResponse",
+        "ReportStatusResponse",
+        "ServiceIndex",
+        "UploadResponse",
+    ):
+        assert schemas[name]["examples"]
+
+    serialized_examples = str(
+        {name: schema.get("examples") for name, schema in schemas.items()}
+    )
+    assert settings.MVP_API_KEY.get_secret_value() not in serialized_examples
+    assert "example.invalid" not in serialized_examples
+
+
+@pytest.mark.unit
+def test_package_readme_and_openapi_metadata_are_aligned() -> None:
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    project = pyproject["project"]
+
+    assert project["description"] == APP_SUMMARY
+    assert project["version"] == APP_VERSION
+    assert project["urls"] == {
+        "Homepage": REPOSITORY_URL,
+        "Repository": REPOSITORY_URL,
+        "Documentation": f"{REPOSITORY_URL}#readme",
+        "Architecture": f"{REPOSITORY_URL}/blob/main/ARCHITECTURE.md",
+    }
+    assert APP_SUMMARY in readme
+    assert f"**{APP_VERSION}**" in readme
+    assert REPOSITORY_URL in readme
+    assert CONTACT_URL in readme
 
 
 @pytest.mark.unit
