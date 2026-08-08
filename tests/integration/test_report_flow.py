@@ -2,7 +2,7 @@
 
 Only the LLM provider is mocked — the real model is never called in CI. The
 Celery task runs synchronously (``task_always_eager``) with its sync DB session
-and provider swapped for test-bound twins, so ``POST /api/v1/report`` exercises the
+and provider swapped for test-bound twins, so ``POST /report`` exercises the
 full enqueue → WP-context → generate → persist path against the test database.
 """
 
@@ -182,7 +182,7 @@ async def test_full_report_flow(
 ):
     await _seed_games(async_session, THRESHOLD)
 
-    resp = await client.post(f"/api/v1/report/{PLAYER}")
+    resp = await client.post(f"/report/{PLAYER}")
     assert resp.status_code == 202
     assert resp.json()["action"] == "generate"
 
@@ -200,7 +200,7 @@ async def test_full_report_flow(
     assert "ACPL" not in user_digest
     assert "centipawn" not in user_digest.lower()
 
-    get_resp = await client.get(f"/api/v1/report/{PLAYER}")
+    get_resp = await client.get(f"/report/{PLAYER}")
     assert get_resp.status_code == 200
     body = get_resp.json()
     assert body["report_text"] == MOCK_REPORT_TEXT
@@ -215,13 +215,13 @@ async def test_insufficient_games_no_generation(
 ):
     await _seed_games(async_session, THRESHOLD - 1)
 
-    resp = await client.post(f"/api/v1/report/{PLAYER}")
+    resp = await client.post(f"/report/{PLAYER}")
     assert resp.status_code == 200
     assert resp.json()["action"] == "insufficient_games"
 
     assert _report_snapshot(sync_session_factory) is None
 
-    get_resp = await client.get(f"/api/v1/report/{PLAYER}")
+    get_resp = await client.get(f"/report/{PLAYER}")
     assert get_resp.status_code == 404
 
 
@@ -231,20 +231,20 @@ async def test_regenerates_after_threshold(
     async_session, client, eager_task, sync_session_factory
 ):
     await _seed_games(async_session, THRESHOLD)
-    first = await client.post(f"/api/v1/report/{PLAYER}")
+    first = await client.post(f"/report/{PLAYER}")
     assert first.status_code == 202
     assert _report_snapshot(sync_session_factory)["analyzed_games_count"] == THRESHOLD
 
     # Pour in enough new analyzed games to cross the refresh threshold.
     await _seed_games(async_session, THRESHOLD, start=THRESHOLD)
 
-    stale = await client.get(f"/api/v1/report/{PLAYER}")
+    stale = await client.get(f"/report/{PLAYER}")
     assert stale.status_code == 200
     stale_body = stale.json()
     assert stale_body["is_stale"] is True
     assert stale_body["analyzed_games_count"] == THRESHOLD  # still the old snapshot
 
-    regen = await client.post(f"/api/v1/report/{PLAYER}")
+    regen = await client.post(f"/report/{PLAYER}")
     assert regen.status_code == 202
     assert regen.json()["action"] == "generate"
 
@@ -252,7 +252,7 @@ async def test_regenerates_after_threshold(
     assert snapshot["analyzed_games_count"] == 2 * THRESHOLD
     assert snapshot["status"] == "ready"
 
-    fresh = await client.get(f"/api/v1/report/{PLAYER}")
+    fresh = await client.get(f"/report/{PLAYER}")
     assert fresh.json()["analyzed_games_count"] == 2 * THRESHOLD
     assert fresh.json()["is_stale"] is False
 
@@ -263,7 +263,7 @@ async def test_deleted_report_can_regenerate(
     async_session, client, eager_task, sync_session_factory
 ):
     await _seed_games(async_session, THRESHOLD)
-    await client.post(f"/api/v1/report/{PLAYER}")
+    await client.post(f"/report/{PLAYER}")
     assert _report_snapshot(sync_session_factory) is not None
 
     # Deleting the row is the supported way to force a regeneration (no `force`).
@@ -276,7 +276,7 @@ async def test_deleted_report_can_regenerate(
         session.commit()
     assert _report_snapshot(sync_session_factory) is None
 
-    resp = await client.post(f"/api/v1/report/{PLAYER}")
+    resp = await client.post(f"/report/{PLAYER}")
     assert resp.status_code == 202
     assert resp.json()["action"] == "generate"
 
@@ -293,17 +293,17 @@ async def test_below_threshold_returns_cached(
     async_session, client, eager_task, sync_session_factory
 ):
     await _seed_games(async_session, THRESHOLD)
-    await client.post(f"/api/v1/report/{PLAYER}")
+    await client.post(f"/report/{PLAYER}")
     assert _report_snapshot(sync_session_factory)["analyzed_games_count"] == THRESHOLD
 
     # A handful of new games — below the threshold, so no regeneration.
     await _seed_games(async_session, THRESHOLD - 1, start=THRESHOLD)
 
-    resp = await client.post(f"/api/v1/report/{PLAYER}")
+    resp = await client.post(f"/report/{PLAYER}")
     assert resp.status_code == 200
     assert resp.json()["action"] == "up_to_date"
 
-    get_resp = await client.get(f"/api/v1/report/{PLAYER}")
+    get_resp = await client.get(f"/report/{PLAYER}")
     body = get_resp.json()
     assert body["report_text"] == MOCK_REPORT_TEXT
     assert body["analyzed_games_count"] == THRESHOLD  # unchanged snapshot

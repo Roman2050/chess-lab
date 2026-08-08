@@ -9,11 +9,11 @@ from app.services.rate_limit import RateLimitOperation
 
 
 PROTECTED_POSTS = [
-    pytest.param("/api/v1/games/lichess/operator?max_games=1", False, id="lichess-import"),
-    pytest.param("/api/v1/games/upload", True, id="pgn-upload"),
-    pytest.param("/api/v1/games/1/analyze", False, id="single-analysis"),
-    pytest.param("/api/v1/analyze/player/operator", False, id="batch-analysis"),
-    pytest.param("/api/v1/report/operator", False, id="report"),
+    pytest.param("/games/lichess/operator?max_games=1", False, id="lichess-import"),
+    pytest.param("/games/upload", True, id="pgn-upload"),
+    pytest.param("/games/1/analyze", False, id="single-analysis"),
+    pytest.param("/analyze/player/operator", False, id="batch-analysis"),
+    pytest.param("/report/operator", False, id="report"),
 ]
 INVALID_API_KEY = "invalid-mvp-api-key-must-never-be-logged"
 
@@ -146,18 +146,18 @@ async def test_valid_key_reaches_each_existing_post_handler(
 
     responses = [
         await access_client.post(
-            "/api/v1/games/lichess/operator?max_games=1", headers=auth_headers
+            "/games/lichess/operator?max_games=1", headers=auth_headers
         ),
         await access_client.post(
-            "/api/v1/games/upload",
+            "/games/upload",
             headers=auth_headers,
             files={"file": ("games.pgn", b"PGN text", "application/x-chess-pgn")},
         ),
-        await access_client.post("/api/v1/games/1/analyze", headers=auth_headers),
+        await access_client.post("/games/1/analyze", headers=auth_headers),
         await access_client.post(
-            "/api/v1/analyze/player/operator", headers=auth_headers
+            "/analyze/player/operator", headers=auth_headers
         ),
-        await access_client.post("/api/v1/report/operator", headers=auth_headers),
+        await access_client.post("/report/operator", headers=auth_headers),
     ]
 
     assert [response.status_code for response in responses] == [200, 200, 200, 200, 200]
@@ -190,11 +190,11 @@ async def test_openapi_marks_only_post_operations_as_protected(access_client):
     }
 
     protected_operations = {
-        ("/api/v1/games/lichess/{username}", "post"),
-        ("/api/v1/games/upload", "post"),
-        ("/api/v1/games/{game_id}/analyze", "post"),
-        ("/api/v1/analyze/player/{username}", "post"),
-        ("/api/v1/report/{username}", "post"),
+        ("/games/lichess/{username}", "post"),
+        ("/games/upload", "post"),
+        ("/games/{game_id}/analyze", "post"),
+        ("/analyze/player/{username}", "post"),
+        ("/report/{username}", "post"),
     }
     actual_post_operations = {
         (path, method)

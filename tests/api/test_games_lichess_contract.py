@@ -95,7 +95,7 @@ async def test_lichess_route_maps_service_errors_without_leaking_upstream(
     monkeypatch.setattr(games_router, "parse_pgn_text", should_not_be_called)
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
-    resp = await api_client.post("/api/v1/games/lichess/u?max_games=1")
+    resp = await api_client.post("/games/lichess/u?max_games=1")
     assert resp.status_code == status_code
     assert resp.json() == {"detail": detail}
     assert "<html>" not in resp.text
@@ -122,7 +122,7 @@ async def test_lichess_route_429_includes_bounded_retry_after(
     monkeypatch.setattr(games_router, "parse_pgn_text", should_not_be_called)
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
-    resp = await api_client.post("/api/v1/games/lichess/u?max_games=1")
+    resp = await api_client.post("/games/lichess/u?max_games=1")
     assert resp.status_code == 429
     assert resp.json() == {
         "detail": "Lichess rate limit is active, retry later"
@@ -163,7 +163,7 @@ async def test_lichess_route_happy_path_returns_stats(api_client, monkeypatch):
     monkeypatch.setattr(games_router, "parse_pgn_text", fake_parse)
     monkeypatch.setattr(games_router, "bulk_save_games", fake_bulk_save)
 
-    resp = await api_client.post("/api/v1/games/lichess/u?max_games=2")
+    resp = await api_client.post("/games/lichess/u?max_games=2")
     assert resp.status_code == 200
     body = resp.json()
     assert body["message"] == "Games from Lichess have been successfully processed for u"
@@ -189,7 +189,7 @@ async def test_lichess_route_returns_no_standard_games_when_parser_empty(api_cli
     monkeypatch.setattr(games_router, "parse_pgn_text", fake_parse)
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
-    resp = await api_client.post("/api/v1/games/lichess/u?max_games=2")
+    resp = await api_client.post("/games/lichess/u?max_games=2")
     assert resp.status_code == 200
     body = resp.json()
     assert body["message"] == "No standard games found for the user u."

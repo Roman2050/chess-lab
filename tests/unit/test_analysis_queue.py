@@ -40,7 +40,7 @@ async def api_client(app, override_db, auth_headers):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# POST /api/v1/analyze/player/{username} — fan-out
+# POST /analyze/player/{username} — fan-out
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -64,7 +64,7 @@ async def test_enqueue_player_analysis_respects_task_limit(api_client, monkeypat
     monkeypatch.setattr(analysis_router, "get_unanalyzed_game_ids", fake_ids)
     monkeypatch.setattr(analysis_router.analyze_game, "delay", delay_mock)
 
-    resp = await api_client.post(f"/api/v1/analyze/player/{PLAYER}")
+    resp = await api_client.post(f"/analyze/player/{PLAYER}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -88,7 +88,7 @@ async def test_enqueue_player_analysis_empty_404(api_client, monkeypatch):
     monkeypatch.setattr(analysis_router, "get_unanalyzed_game_ids", fake_ids)
     monkeypatch.setattr(analysis_router.analyze_game, "delay", delay_mock)
 
-    resp = await api_client.post(f"/api/v1/analyze/player/{PLAYER}")
+    resp = await api_client.post(f"/analyze/player/{PLAYER}")
 
     assert resp.status_code == 404
     assert resp.json()["detail"] == "No unanalyzed games for player"
@@ -96,7 +96,7 @@ async def test_enqueue_player_analysis_empty_404(api_client, monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# GET /api/v1/analyze/player/{username}/status — progress
+# GET /analyze/player/{username}/status — progress
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -112,7 +112,7 @@ async def test_analysis_status_counts(api_client, monkeypatch):
 
     monkeypatch.setattr(analysis_router, "get_analysis_progress", fake_progress)
 
-    resp = await api_client.get(f"/api/v1/analyze/player/{PLAYER}/status")
+    resp = await api_client.get(f"/analyze/player/{PLAYER}/status")
 
     assert resp.status_code == 200
     assert resp.json() == {
@@ -134,7 +134,7 @@ async def test_analysis_status_unknown_player_404(api_client, monkeypatch):
 
     monkeypatch.setattr(analysis_router, "get_analysis_progress", fake_progress)
 
-    resp = await api_client.get(f"/api/v1/analyze/player/{PLAYER}/status")
+    resp = await api_client.get(f"/analyze/player/{PLAYER}/status")
 
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Player not found"

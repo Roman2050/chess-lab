@@ -100,7 +100,7 @@ async def test_post_generate_enqueues_and_202(api_client, patched):
     patched.count.return_value = 20
     patched.get.return_value = None
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 202
     body = resp.json()
@@ -115,7 +115,7 @@ async def test_post_report_sets_generating_before_enqueue(api_client, patched):
     patched.count.return_value = 20
     patched.get.return_value = None
 
-    await api_client.post(f"/api/v1/report/{PLAYER}")
+    await api_client.post(f"/report/{PLAYER}")
 
     _db, *claim_args = patched.upsert.await_args.args
     assert claim_args == [PLAYER, "en", 20]
@@ -131,7 +131,7 @@ async def test_post_lost_claim_race_does_not_enqueue(api_client, patched):
     patched.get.return_value = None
     patched.upsert.return_value = False
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 202
     assert resp.json()["action"] == "already_generating"
@@ -148,7 +148,7 @@ async def test_post_stale_generation_is_reclaimed(api_client, patched):
     )
     patched.stale.return_value = True
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 202
     assert resp.json()["action"] == "generate"
@@ -163,7 +163,7 @@ async def test_post_enqueue_failure_releases_the_claim(api_client, patched):
     patched.get.return_value = None
     patched.delay.side_effect = OSError("redis is down")
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 503
     assert [name for name, *_ in patched.calls.mock_calls] == [
@@ -179,7 +179,7 @@ async def test_post_insufficient_200(api_client, patched):
     patched.count.return_value = 5
     patched.get.return_value = None
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -194,7 +194,7 @@ async def test_post_up_to_date_200(api_client, patched):
     patched.count.return_value = 25
     patched.get.return_value = _make_report(analyzed_games_count=20)
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -212,7 +212,7 @@ async def test_post_already_generating_202(api_client, patched):
         analyzed_games_count=20, status="generating", report_text=None
     )
 
-    resp = await api_client.post(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.post(f"/report/{PLAYER}")
 
     assert resp.status_code == 202
     assert resp.json()["action"] == "already_generating"
@@ -226,7 +226,7 @@ async def test_get_report_404_when_none(api_client, patched):
     patched.get.return_value = None
     patched.count.return_value = 0
 
-    resp = await api_client.get(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.get(f"/report/{PLAYER}")
 
     assert resp.status_code == 404
 
@@ -239,7 +239,7 @@ async def test_get_report_returns_text_and_is_stale(api_client, patched):
     )
     patched.count.return_value = 40  # delta 30 >= 20 → stale
 
-    resp = await api_client.get(f"/api/v1/report/{PLAYER}")
+    resp = await api_client.get(f"/report/{PLAYER}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -257,7 +257,7 @@ async def test_status_reports_state(api_client, patched):
     )
     patched.count.return_value = 25
 
-    resp = await api_client.get(f"/api/v1/report/{PLAYER}/status")
+    resp = await api_client.get(f"/report/{PLAYER}/status")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -273,9 +273,9 @@ async def test_status_reports_state(api_client, patched):
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        pytest.param("POST", f"/api/v1/report/{PLAYER}", id="post"),
-        pytest.param("GET", f"/api/v1/report/{PLAYER}", id="get"),
-        pytest.param("GET", f"/api/v1/report/{PLAYER}/status", id="status"),
+        pytest.param("POST", f"/report/{PLAYER}", id="post"),
+        pytest.param("GET", f"/report/{PLAYER}", id="get"),
+        pytest.param("GET", f"/report/{PLAYER}/status", id="status"),
     ],
 )
 async def test_report_endpoints_accept_supported_language(
@@ -299,9 +299,9 @@ async def test_report_endpoints_accept_supported_language(
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        pytest.param("POST", f"/api/v1/report/{PLAYER}", id="post"),
-        pytest.param("GET", f"/api/v1/report/{PLAYER}", id="get"),
-        pytest.param("GET", f"/api/v1/report/{PLAYER}/status", id="status"),
+        pytest.param("POST", f"/report/{PLAYER}", id="post"),
+        pytest.param("GET", f"/report/{PLAYER}", id="get"),
+        pytest.param("GET", f"/report/{PLAYER}/status", id="status"),
     ],
 )
 @pytest.mark.parametrize("language", ["EN", "fr"])

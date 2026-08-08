@@ -38,7 +38,7 @@ async def test_upload_rejects_non_pgn_extension(api_client, monkeypatch):
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
     files = {"file": ("games.txt", b"anything", "text/plain")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Only files with the .pgn extension may be uploaded"
@@ -57,7 +57,7 @@ async def test_upload_rejects_non_utf8_file(api_client, monkeypatch):
 
     # Invalid UTF-8 bytes should trigger UnicodeDecodeError in the endpoint.
     files = {"file": ("games.pgn", b"\xff\xfe\x00\x00", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "File encoding error. UTF-8 is expected."
@@ -78,7 +78,7 @@ async def test_upload_returns_no_valid_games_when_parser_returns_empty(api_clien
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
     files = {"file": ("games.pgn", b"some utf-8 text", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -116,7 +116,7 @@ async def test_upload_happy_path_uses_parser_and_bulk_save(api_client, monkeypat
     monkeypatch.setattr(games_router, "bulk_save_games", fake_bulk_save)
 
     files = {"file": ("games.pgn", b"utf-8 pgn content", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -143,7 +143,7 @@ async def test_upload_rejects_more_than_game_limit_before_db_write(
     monkeypatch.setattr(games_router, "bulk_save_games", should_not_be_called)
 
     files = {"file": ("games.pgn", b"utf-8 pgn content", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 413
     assert resp.json()["detail"] == "PGN file exceeds the limit of 2 games"
@@ -165,7 +165,7 @@ async def test_upload_accepts_exact_game_limit(api_client, monkeypatch):
     monkeypatch.setattr(games_router, "bulk_save_games", fake_bulk_save)
 
     files = {"file": ("games.pgn", b"utf-8 pgn content", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 200
     assert resp.json()["stats"] == {"saved_new": 2, "total_processed": 2}
@@ -181,7 +181,7 @@ async def test_upload_too_large_413(api_client, monkeypatch):
 
     large_content = b"x" * 150
     files = {"file": ("games.pgn", large_content, "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 413
     assert "File size exceeds maximum limit" in resp.json()["detail"]
@@ -191,7 +191,7 @@ async def test_upload_too_large_413(api_client, monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_without_filename_400(api_client):
     files = {"file": ("   ", b"some content", "application/octet-stream")}
-    resp = await api_client.post("/api/v1/games/upload", files=files)
+    resp = await api_client.post("/games/upload", files=files)
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Filename is required"

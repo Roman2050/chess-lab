@@ -1,5 +1,4 @@
 from typing import Annotated, Self
-from urllib.parse import urlsplit
 
 from pydantic import (
     Field,
@@ -27,7 +26,6 @@ GENERIC_HTTP_USER_AGENTS = (
 # across those retries is 1 + 2 + 4 seconds (jitter can only shorten it).
 REPORT_LLM_MAX_RETRIES = 3
 REPORT_LLM_RETRY_BACKOFF_SECONDS = 1 + 2 + 4
-API_V1_PREFIX = "/api/v1"
 
 
 class Settings(BaseSettings):
@@ -37,12 +35,6 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_NAME: str
     redis_url: str | None = None
-
-    # Public discovery and browser access. CORS origins are exact origins
-    # (scheme + host + optional port), never URL prefixes or wildcard patterns.
-    DEMO_PLAYER_NAME: str = Field(default="DemoPlayer", min_length=1)
-    CORS_ALLOWED_ORIGINS: Annotated[tuple[str, ...], NoDecode] = ()
-    FRONTEND_DEPLOYMENT_ENABLED: bool = False
 
     # Required for every mutating or expensive API operation. There is no
     # development fallback: missing configuration must fail at import/startup.
@@ -148,39 +140,6 @@ class Settings(BaseSettings):
             raise ValueError("REPORT_ALLOWED_LANGUAGES must not contain empty items")
         return languages
 
-    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_cors_allowed_origins(cls, value: object) -> tuple[str, ...]:
-        """Parse and validate the exact browser-origin allowlist once."""
-        if isinstance(value, str) and not value.strip():
-            return ()
-        raw_items: object = value.split(",") if isinstance(value, str) else value
-        if not isinstance(raw_items, (list, tuple, set, frozenset)):
-            raise ValueError("CORS_ALLOWED_ORIGINS must be comma-separated")
-
-        origins = tuple(item.strip() for item in raw_items if isinstance(item, str))
-        if len(origins) != len(raw_items):
-            raise ValueError("CORS_ALLOWED_ORIGINS must contain strings")
-        if len(set(origins)) != len(origins):
-            raise ValueError("CORS_ALLOWED_ORIGINS must not contain duplicates")
-
-        for origin in origins:
-            parsed = urlsplit(origin)
-            if (
-                not origin
-                or parsed.scheme not in {"http", "https"}
-                or not parsed.netloc
-                or parsed.path
-                or parsed.query
-                or parsed.fragment
-                or parsed.username is not None
-                or parsed.password is not None
-            ):
-                raise ValueError(
-                    "CORS_ALLOWED_ORIGINS entries must be exact http(s) origins"
-                )
-        return origins
-
     @model_validator(mode="after")
     def validate_dependent_settings(self) -> Self:
         """Validate settings that depend on another setting."""
@@ -192,11 +151,6 @@ class Settings(BaseSettings):
         if self.REPORT_LANGUAGE not in self.REPORT_ALLOWED_LANGUAGES:
             raise ValueError(
                 "REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES"
-            )
-        if self.FRONTEND_DEPLOYMENT_ENABLED and not self.CORS_ALLOWED_ORIGINS:
-            raise ValueError(
-                "CORS_ALLOWED_ORIGINS must not be empty when frontend deployment "
-                "is enabled"
             )
         minimum_report_lease = (
             (REPORT_LLM_MAX_RETRIES + 1) * self.LLM_TIMEOUT
