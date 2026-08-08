@@ -45,7 +45,7 @@ class ReportContext(BaseModel):
 
 
 class ReportRequestResponse(BaseModel):
-    """Response to ``POST /report/{username}`` — the decision outcome, not the text."""
+    """Response to ``POST /api/v1/report/{username}`` — the decision outcome."""
 
     player: str
     language: str
@@ -57,7 +57,7 @@ class ReportRequestResponse(BaseModel):
 
 
 class ReportResponse(BaseModel):
-    """Response to ``GET /report/{username}`` — the cached report text + freshness."""
+    """Response to ``GET /api/v1/report/{username}`` — cached text + freshness."""
 
     player: str
     language: str
@@ -72,7 +72,7 @@ class ReportResponse(BaseModel):
 
 
 class ReportStatusResponse(BaseModel):
-    """Response to ``GET /report/{username}/status`` — generation state only."""
+    """Response to ``GET /api/v1/report/{username}/status`` — state only."""
 
     player: str
     language: str
