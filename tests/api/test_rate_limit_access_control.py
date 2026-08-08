@@ -54,7 +54,7 @@ async def test_exhausted_quota_returns_429_before_business_logic(
     monkeypatch.setattr(games_router, "fetch_games_from_lichess", fetch)
 
     response = await async_client.post(
-        "/games/lichess/operator?max_games=1",
+        "/api/v1/games/lichess/operator?max_games=1",
         headers=auth_headers,
     )
 
@@ -82,7 +82,7 @@ async def test_redis_failure_returns_503_before_business_logic(
     monkeypatch.setattr(security, "consume_operation_quota", consume)
     monkeypatch.setattr(report_router, "count_analyzed_games", count_games)
 
-    response = await async_client.post("/report/operator", headers=auth_headers)
+    response = await async_client.post("/api/v1/report/operator", headers=auth_headers)
 
     assert response.status_code == 503
     assert response.json() == {
@@ -121,9 +121,9 @@ async def test_single_and_batch_analysis_share_one_operation_budget(
         AsyncMock(return_value=[2]),
     )
 
-    single = await async_client.post("/games/1/analyze", headers=auth_headers)
+    single = await async_client.post("/api/v1/games/1/analyze", headers=auth_headers)
     batch = await async_client.post(
-        "/analyze/player/operator",
+        "/api/v1/analyze/player/operator",
         headers=auth_headers,
     )
 

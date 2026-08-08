@@ -8,10 +8,10 @@ training report.
 
 After a local start, the interactive OpenAPI UI is available at
 `http://localhost:8000/docs` and ReDoc at `http://localhost:8000/redoc`.
-The current API exposes deterministic player statistics through
-`GET /games/stats/{player_name}` and a cached, LLM-narrated report through
-`GET /report/{username}`. A hosted demo and release screenshots are intentionally
-left for production packaging.
+Start at `GET /` for public service links or `GET /api/v1/demo` to discover the
+configured read-only demo player without knowing a nickname. The versioned API
+exposes deterministic statistics through `GET /api/v1/games/stats/{player_name}`
+and a cached, LLM-narrated report through `GET /api/v1/report/{username}`.
 
 ## How the pipeline works
 
@@ -66,6 +66,9 @@ required only to generate reports.
 1. Copy [.env.example](.env.example) to `.env`. Generate a fresh `MVP_API_KEY`, set
    `LICHESS_USER_AGENT` to the deployed application name plus a real monitored
    contact, and configure `STOCKFISH_PATH` when analysis is needed.
+   If a separate browser frontend is enabled, set its exact origins in
+   `CORS_ALLOWED_ORIGINS`. The operator `MVP_API_KEY` is server-side only and must
+   never be embedded in frontend JavaScript.
 2. Start PostgreSQL and Redis and apply migrations:
 
    ```bash
@@ -113,23 +116,25 @@ the shell variables below with local values without committing them.
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/ready
+curl http://localhost:8000/
+curl http://localhost:8000/api/v1/demo
 
 curl -X POST \
   -H "X-API-Key: $CHESS_LAB_API_KEY" \
-  "http://localhost:8000/games/lichess/$LICHESS_USERNAME?max_games=20"
+  "http://localhost:8000/api/v1/games/lichess/$LICHESS_USERNAME?max_games=20"
 
 curl -X POST \
   -H "X-API-Key: $CHESS_LAB_API_KEY" \
-  "http://localhost:8000/analyze/player/$LICHESS_USERNAME"
+  "http://localhost:8000/api/v1/analyze/player/$LICHESS_USERNAME"
 
-curl "http://localhost:8000/analyze/player/$LICHESS_USERNAME/status"
-curl "http://localhost:8000/games/stats/$LICHESS_USERNAME"
+curl "http://localhost:8000/api/v1/analyze/player/$LICHESS_USERNAME/status"
+curl "http://localhost:8000/api/v1/games/stats/$LICHESS_USERNAME"
 
 curl -X POST \
   -H "X-API-Key: $CHESS_LAB_API_KEY" \
-  "http://localhost:8000/report/$LICHESS_USERNAME?language=en"
+  "http://localhost:8000/api/v1/report/$LICHESS_USERNAME?language=en"
 
-curl "http://localhost:8000/report/$LICHESS_USERNAME?language=en"
+curl "http://localhost:8000/api/v1/report/$LICHESS_USERNAME?language=en"
 ```
 
 ## Tests and quality gates
@@ -173,7 +178,8 @@ of settings and safe placeholders.
 - Analysis tasks have no automatic stale-lease reaper if a worker dies while a game
   is marked `running`.
 - The MVP uses one operator API key; multi-user authentication and per-user OAuth
-  are outside the current scope.
+  are outside the current scope. Browser clients are intentionally unable to send
+  this operator key through CORS.
 - Production packaging, hosted demo metadata, monitoring integration, and deployment
   smoke automation remain roadmap work.
 
