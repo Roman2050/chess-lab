@@ -6,6 +6,8 @@ import pytest
 from app.config import API_V1_PREFIX, settings
 from app.main import (
     APP_DESCRIPTION,
+    APP_LICENSE_IDENTIFIER,
+    APP_LICENSE_NAME,
     APP_NAME,
     APP_SUMMARY,
     APP_VERSION,
@@ -96,6 +98,10 @@ async def test_openapi_metadata_is_ordered_real_and_secret_free(async_client) ->
         "summary": APP_SUMMARY,
         "description": APP_DESCRIPTION,
         "contact": {"name": "Roman", "url": CONTACT_URL},
+        "license": {
+            "name": APP_LICENSE_NAME,
+            "identifier": APP_LICENSE_IDENTIFIER,
+        },
         "version": APP_VERSION,
     }
     assert schema["tags"] == OPENAPI_TAGS
@@ -186,6 +192,8 @@ def test_package_readme_and_openapi_metadata_are_aligned() -> None:
 
     assert project["description"] == APP_SUMMARY
     assert project["version"] == APP_VERSION
+    assert project["license"] == APP_LICENSE_IDENTIFIER
+    assert project["license-files"] == ["LICENSE", "THIRD_PARTY_NOTICES.md"]
     assert project["urls"] == {
         "Homepage": REPOSITORY_URL,
         "Repository": REPOSITORY_URL,
@@ -196,6 +204,8 @@ def test_package_readme_and_openapi_metadata_are_aligned() -> None:
     assert f"**{APP_VERSION}**" in readme
     assert REPOSITORY_URL in readme
     assert CONTACT_URL in readme
+    assert APP_LICENSE_IDENTIFIER in readme
+    assert "THIRD_PARTY_NOTICES.md" in readme
 
 
 @pytest.mark.unit

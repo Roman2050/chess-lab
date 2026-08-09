@@ -249,6 +249,21 @@ browser headers needed by the public flow, without credentials or wildcards.
 `MVP_API_KEY` remains an operator-only server-side secret and must never be embedded
 in a browser frontend.
 
+**3.17 License and Reproducible Third-Party Sources (Phase 8)**
+Chess Lab is distributed under `GPL-3.0-or-later`, with copyright held by Roman
+Kozhemiachenko. `pyproject.toml`, OpenAPI, README, wheel/sdist metadata, and the
+future OCI image labels use the same SPDX expression. `LICENSE` carries the full
+GPLv3 text, while `THIRD_PARTY_NOTICES.md` records the key upstream components.
+
+The Python lock resolves `python-chess` 1.999 to `chess` 1.11.2. The production
+Stockfish contract is version 18, tag `sf_18`, exact commit
+`cb3d4ee9b47d0c5aae855b12379378ea1439675c`, built unmodified for Linux x86-64.
+The wheel/sdist does not bundle the engine; any container that does must retain the
+GPL text, notices, exact corresponding-source pointer, and reproducible build
+recipe. The ECO generator downloads only `lichess-org/chess-openings` commit
+`4b8622759e7ae6f93f011cc6c83a3823401ab45e`, not a moving branch. Chess Lab makes
+no affiliation or endorsement claim for Lichess or Stockfish.
+
 ---
 
 ## 4. Project File Structure
@@ -330,6 +345,8 @@ chess-lab/
 ├── docker-compose.yml         # PostgreSQL 16 + (planned) Redis
 ├── pyproject.toml             # Dependencies, pytest config, build system
 ├── ARCHITECTURE.md            # This file — read before architectural changes
+├── LICENSE                    # Chess Lab GPL-3.0-or-later terms and full GPLv3 text
+├── THIRD_PARTY_NOTICES.md     # Key dependency/data attribution and exact sources
 └── .env                       # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
                                # REDIS_URL, STOCKFISH_*
 ```
