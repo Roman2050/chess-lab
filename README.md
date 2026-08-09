@@ -82,8 +82,9 @@ required only to generate reports.
    ```
 
    `data/eco.json` is a generated artifact and is intentionally ignored by Git.
-   Generate it once after checkout and again when refreshing the upstream opening
-   dataset.
+   The generator downloads the immutable `lichess-org/chess-openings` revision
+   recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), so local and CI
+   builds use the same opening dataset.
 
 3. Start the API:
 
@@ -188,5 +189,12 @@ of settings and safe placeholders.
 
 ## License
 
-No license file has been published for this repository. Copyright is therefore
-reserved by default.
+Copyright © 2026 Roman Kozhemiachenko.
+
+Chess Lab is licensed under the [GNU General Public License version 3 or
+later](LICENSE) (`GPL-3.0-or-later`). Attribution, exact source revisions, and
+distribution terms for python-chess, Stockfish, and the ECO opening dataset are
+recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Chess Lab is independent and is not affiliated with, endorsed by, or sponsored by
+Lichess or the Stockfish project.

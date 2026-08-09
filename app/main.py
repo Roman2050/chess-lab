@@ -20,6 +20,8 @@ from app.services.rate_limit import is_rate_limit_backend_ready
 APP_NAME = "Chess Lab API"
 APP_SUMMARY = "Bulk chess game analysis and opponent scouting with Stockfish-backed insights."
 APP_VERSION = version("chess-lab")
+APP_LICENSE_NAME = "GNU General Public License v3.0 or later"
+APP_LICENSE_IDENTIFIER = "GPL-3.0-or-later"
 REPOSITORY_URL = "https://github.com/Roman2050/chess-lab"
 CONTACT_URL = "https://github.com/Roman2050"
 
@@ -86,6 +88,10 @@ app = FastAPI(
     description=APP_DESCRIPTION,
     version=APP_VERSION,
     contact={"name": "Roman", "url": CONTACT_URL},
+    license_info={
+        "name": APP_LICENSE_NAME,
+        "identifier": APP_LICENSE_IDENTIFIER,
+    },
     openapi_tags=OPENAPI_TAGS,
 )
 
