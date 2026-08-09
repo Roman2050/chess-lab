@@ -1,7 +1,7 @@
 """
-Download ECO opening lines from lichess-org/chess-openings (TSV) and build data/eco.json.
+Download pinned ECO opening lines from lichess-org/chess-openings and build data/eco.json.
 
-Source: https://github.com/lichess-org/chess-openings (CC0-1.0, see COPYING.txt there).
+Source is pinned by commit below and distributed under CC0-1.0.
 """
 
 from __future__ import annotations
@@ -17,7 +17,9 @@ from pathlib import Path
 import chess
 import chess.pgn
 
-BASE = "https://raw.githubusercontent.com/lichess-org/chess-openings/master"
+ECO_SOURCE_REPOSITORY = "https://github.com/lichess-org/chess-openings"
+ECO_SOURCE_COMMIT = "4b8622759e7ae6f93f011cc6c83a3823401ab45e"
+BASE = f"https://raw.githubusercontent.com/lichess-org/chess-openings/{ECO_SOURCE_COMMIT}"
 TSV_FILES = ("a.tsv", "b.tsv", "c.tsv", "d.tsv", "e.tsv")
 
 
