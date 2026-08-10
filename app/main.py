@@ -16,7 +16,6 @@ from app.schemas.public import (
 )
 from app.services.rate_limit import is_rate_limit_backend_ready
 
-
 APP_NAME = "Chess Lab API"
 APP_SUMMARY = "Bulk chess game analysis and opponent scouting with Stockfish-backed insights."
 APP_VERSION = version("chess-lab")

@@ -76,9 +76,7 @@ def compute_error_patterns(games: list[Game], player_name: str) -> dict:
             "error_count": count,
             "error_pct": round(count / total_errors * 100, 1),
         }
-        for piece, count in sorted(
-            piece_counts.items(), key=lambda item: item[1], reverse=True
-        )
+        for piece, count in sorted(piece_counts.items(), key=lambda item: item[1], reverse=True)
     ]
 
     errors_by_move_number = [

@@ -154,9 +154,7 @@ class StockfishEngine:
     ) -> list[dict]:
         """Analyse parsed moves with an engine whose lifecycle is managed elsewhere."""
         out: list[dict] = []
-        current_eval, current_best, current_second = self._analyse_position(
-            engine, board
-        )
+        current_eval, current_best, current_second = self._analyse_position(engine, board)
 
         for ply, move in enumerate(moves, start=1):
             eval_before = current_eval
@@ -167,9 +165,7 @@ class StockfishEngine:
             san = board.san(move)
 
             board.push(move)
-            current_eval, current_best, current_second = self._analyse_position(
-                engine, board
-            )
+            current_eval, current_best, current_second = self._analyse_position(engine, board)
 
             out.append(
                 {

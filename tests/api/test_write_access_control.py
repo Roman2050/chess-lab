@@ -7,7 +7,6 @@ import pytest
 from app.database import get_async_db
 from app.services.rate_limit import RateLimitOperation
 
-
 PROTECTED_POSTS = [
     pytest.param("/api/v1/games/lichess/operator?max_games=1", False, id="lichess-import"),
     pytest.param("/api/v1/games/upload", True, id="pgn-upload"),
@@ -77,9 +76,7 @@ async def _post(
 ) -> httpx.Response:
     headers = {"X-API-Key": api_key} if api_key is not None else None
     files = (
-        {"file": ("games.pgn", b"1. e4 e5 1/2-1/2", "application/x-chess-pgn")}
-        if upload
-        else None
+        {"file": ("games.pgn", b"1. e4 e5 1/2-1/2", "application/x-chess-pgn")} if upload else None
     )
     return await client.post(path, headers=headers, files=files)
 
@@ -105,9 +102,7 @@ async def test_protected_post_rejects_missing_and_invalid_key_before_business_lo
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
-    assert missing.json() == invalid.json() == {
-        "detail": "Missing or invalid API key"
-    }
+    assert missing.json() == invalid.json() == {"detail": "Missing or invalid API key"}
     assert INVALID_API_KEY not in missing.text
     assert INVALID_API_KEY not in invalid.text
     assert INVALID_API_KEY not in caplog.text
@@ -154,9 +149,7 @@ async def test_valid_key_reaches_each_existing_post_handler(
             files={"file": ("games.pgn", b"PGN text", "application/x-chess-pgn")},
         ),
         await access_client.post("/api/v1/games/1/analyze", headers=auth_headers),
-        await access_client.post(
-            "/api/v1/analyze/player/operator", headers=auth_headers
-        ),
+        await access_client.post("/api/v1/analyze/player/operator", headers=auth_headers),
         await access_client.post("/api/v1/report/operator", headers=auth_headers),
     ]
 

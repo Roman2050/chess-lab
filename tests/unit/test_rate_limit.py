@@ -66,9 +66,7 @@ async def test_fixed_window_limits_are_independent_and_reset(
 
     assert [result.allowed for result in lichess_results] == [True, True, False]
     assert [result.allowed for result in upload_results] == [True, False]
-    assert {result.retry_after for result in lichess_results + upload_results} == {
-        55
-    }
+    assert {result.retry_after for result in lichess_results + upload_results} == {55}
 
     next_window = await consume_operation_quota(
         RateLimitOperation.LICHESS_IMPORT,
@@ -81,10 +79,7 @@ async def test_fixed_window_limits_are_independent_and_reset(
     raw_api_key = settings.MVP_API_KEY.get_secret_value()
     assert all(raw_api_key not in key for _, _, key, _ in redis.eval_calls)
     assert all(numkeys == 1 for _, numkeys, _, _ in redis.eval_calls)
-    assert all(
-        "INCR" in script and "EXPIRE" in script
-        for script, _, _, _ in redis.eval_calls
-    )
+    assert all("INCR" in script and "EXPIRE" in script for script, _, _, _ in redis.eval_calls)
     assert all(1 <= ttl <= 60 for _, _, _, ttl in redis.eval_calls)
 
 

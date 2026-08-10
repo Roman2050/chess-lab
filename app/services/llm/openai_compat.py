@@ -2,7 +2,6 @@ import httpx
 
 from app.services.llm.base import LLMError
 
-
 _MAX_ERROR_DETAIL_LENGTH = 500
 _SENSITIVE_ERROR_STATUSES = frozenset({401, 403})
 

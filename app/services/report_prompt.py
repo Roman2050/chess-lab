@@ -40,9 +40,7 @@ def build_system_prompt(language: str) -> str:
 
     Pure and deterministic — same ``language`` always yields the same string.
     """
-    return _SYSTEM_PROMPT.format(
-        language=language, no_data=_NO_DATA, not_enough=_NOT_ENOUGH
-    )
+    return _SYSTEM_PROMPT.format(language=language, no_data=_NO_DATA, not_enough=_NOT_ENOUGH)
 
 
 def render_context_to_prompt(ctx: ReportContext) -> str:
@@ -74,9 +72,7 @@ def build_messages(ctx: ReportContext) -> tuple[str, str]:
 
 def _render_player(ctx: ReportContext) -> str:
     covers = (
-        ctx.last_game_played_at.isoformat()
-        if ctx.last_game_played_at is not None
-        else _NO_DATA
+        ctx.last_game_played_at.isoformat() if ctx.last_game_played_at is not None else _NO_DATA
     )
     return (
         "PLAYER / GAMES\n"
@@ -139,9 +135,7 @@ def _render_error_profile(ctx: ReportContext) -> str:
 
     hotspots = [row.move_num for row in ctx.errors.errors_by_move_number]
     if hotspots:
-        lines.append(
-            "error hotspot move numbers: " + ", ".join(str(m) for m in hotspots)
-        )
+        lines.append("error hotspot move numbers: " + ", ".join(str(m) for m in hotspots))
     else:
         lines.append(f"error hotspot move numbers: {_NO_DATA}")
 
@@ -159,11 +153,7 @@ def _render_openings(ctx: ReportContext) -> str:
 
 
 def _opening_line(opening: OpeningStat) -> str:
-    wp = (
-        _fmt(opening.wp_loss_in_opening)
-        if opening.wp_loss_in_opening is not None
-        else _NO_DATA
-    )
+    wp = _fmt(opening.wp_loss_in_opening) if opening.wp_loss_in_opening is not None else _NO_DATA
     return (
         f"{opening.opening_name}: {opening.games_count} games, "
         f"win rate {_fmt(opening.win_rate)}%, wp loss in opening {wp}"
@@ -173,9 +163,7 @@ def _opening_line(opening: OpeningStat) -> str:
 def _render_insights(ctx: ReportContext) -> str:
     ins = ctx.insights
     hotspots = (
-        ", ".join(str(m) for m in ins.error_hotspot_moves)
-        if ins.error_hotspot_moves
-        else _NO_DATA
+        ", ".join(str(m) for m in ins.error_hotspot_moves) if ins.error_hotspot_moves else _NO_DATA
     )
     return (
         "DETECTED INSIGHTS (deterministic, code-derived facts)\n"

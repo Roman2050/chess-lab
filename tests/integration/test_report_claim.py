@@ -54,9 +54,7 @@ async def _seed_ready_report(session, *, count: int = 10) -> None:
 
 async def _expire_lease(session) -> None:
     """Backdate the row far enough that its generation lease has run out."""
-    await session.execute(
-        text("UPDATE player_reports SET updated_at = now() - interval '1 day'")
-    )
+    await session.execute(text("UPDATE player_reports SET updated_at = now() - interval '1 day'"))
     await session.commit()
 
 
@@ -64,10 +62,7 @@ async def _expire_lease(session) -> None:
 @pytest.mark.asyncio
 async def test_second_claim_loses_while_generation_is_live(async_session):
     assert await upsert_generating(async_session, PLAYER, LANGUAGE, 20) is True
-    assert (
-        await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 20)
-        is False
-    )
+    assert await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 20) is False
 
     row = await _row(async_session)
     row_count = await async_session.scalar(select(func.count()).select_from(PlayerReport))
@@ -85,9 +80,7 @@ async def test_expired_lease_is_reclaimable(async_session):
     await _expire_lease(async_session)
 
     assert await is_generation_stale(async_session, await _row(async_session)) is True
-    assert (
-        await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 25) is True
-    )
+    assert await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 25) is True
 
     row = await _row(async_session)
     assert row.player_name == PLAYER
@@ -100,9 +93,7 @@ async def test_claim_keeps_the_previous_report_and_snapshot(async_session):
     """A failed generation must not leave the old text looking up to date."""
     await _seed_ready_report(async_session, count=10)
 
-    assert (
-        await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 40) is True
-    )
+    assert await upsert_generating(async_session, PLAYER_ALTERNATE, LANGUAGE, 40) is True
 
     row = await _row(async_session)
     assert row.status == "generating"

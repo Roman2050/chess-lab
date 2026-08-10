@@ -116,9 +116,7 @@ def test_generate_report_zero_games_marks_failed(patched_task):
     patched_task.get_provider.assert_not_called()
     patched_task.provider.generate.assert_not_called()
     patched_task.save_result.assert_not_called()
-    patched_task.mark_failed.assert_called_once_with(
-        patched_task.session, PLAYER, LANGUAGE
-    )
+    patched_task.mark_failed.assert_called_once_with(patched_task.session, PLAYER, LANGUAGE)
 
 
 @pytest.mark.unit
@@ -155,9 +153,7 @@ def test_report_final_llm_error_marks_failed_once_and_reraises(patched_task):
             task.run(PLAYER, LANGUAGE)
 
     patched_task.save_result.assert_not_called()
-    patched_task.mark_failed.assert_called_once_with(
-        patched_task.session, PLAYER, LANGUAGE
-    )
+    patched_task.mark_failed.assert_called_once_with(patched_task.session, PLAYER, LANGUAGE)
 
 
 @pytest.mark.unit
@@ -181,9 +177,7 @@ def test_report_non_llm_error_is_not_retried(patched_task, failing_phase):
     with pytest.raises(RuntimeError, match="boom"):
         patched_task.celery_app.generate_player_report(PLAYER, LANGUAGE)
 
-    patched_task.mark_failed.assert_called_once_with(
-        patched_task.session, PLAYER, LANGUAGE
-    )
+    patched_task.mark_failed.assert_called_once_with(patched_task.session, PLAYER, LANGUAGE)
 
 
 @pytest.mark.unit

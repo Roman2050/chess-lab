@@ -165,9 +165,7 @@ def test_compute_opening_stats_sorted_and_limited() -> None:
     """12 distinct openings, limit=10 → top 10 by games_count, descending."""
     specs = []
     for i in range(1, 13):  # "Opening 01" once ... "Opening 12" twelve times
-        specs.extend(
-            {"winner": "White", "opening_name": f"Opening {i:02d}"} for _ in range(i)
-        )
+        specs.extend({"winner": "White", "opening_name": f"Opening {i:02d}"} for _ in range(i))
     games = _games(*specs)
 
     rows = compute_opening_stats(games, PLAYER, limit=10)

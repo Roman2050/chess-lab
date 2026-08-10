@@ -56,17 +56,13 @@ def detect_phase(board: chess.Board, ply: int) -> str:
     material = 0
     for piece_type, weight in _NON_PAWN_WEIGHTS.items():
         material += weight * (
-            len(board.pieces(piece_type, chess.WHITE))
-            + len(board.pieces(piece_type, chess.BLACK))
+            len(board.pieces(piece_type, chess.WHITE)) + len(board.pieces(piece_type, chess.BLACK))
         )
 
     if queens == 0 or material <= ENDGAME_MATERIAL_THRESHOLD:
         return "endgame"
 
-    if (
-        ply <= OPENING_MAX_PLY
-        and _count_developed_minors(board) < OPENING_DEVELOPED_THRESHOLD
-    ):
+    if ply <= OPENING_MAX_PLY and _count_developed_minors(board) < OPENING_DEVELOPED_THRESHOLD:
         return "opening"
 
     return "middlegame"

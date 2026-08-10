@@ -29,11 +29,7 @@ def _compiled(stmt):
 
 
 def _literal_sql(stmt) -> str:
-    return str(
-        stmt.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
-    )
+    return str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
 
 class _AsyncDb:

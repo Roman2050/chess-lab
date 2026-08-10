@@ -75,9 +75,8 @@ def test_parse_pgn_text_winner_mapping_for_black_and_draw(
     expected_winner: str,
 ) -> None:
     # Keep header and movetext result consistent (python-chess may infer header from movetext).
-    pgn = (
-        sample_pgn_text.replace('[Result "1-0"]', f'[Result "{result_tag}"]')
-        .replace(" 1-0\n", f" {result_tag}\n")
+    pgn = sample_pgn_text.replace('[Result "1-0"]', f'[Result "{result_tag}"]').replace(
+        " 1-0\n", f" {result_tag}\n"
     )
 
     result = parse_pgn_text(pgn)
@@ -88,7 +87,9 @@ def test_parse_pgn_text_winner_mapping_for_black_and_draw(
 @pytest.mark.unit
 def test_parse_pgn_text_parses_multiple_games_in_one_text(sample_pgn_text: str) -> None:
     second_game = (
-        sample_pgn_text.replace('[Site "https://lichess.org/abcdef12"]', '[Site "https://lichess.org/zzzz9999"]')
+        sample_pgn_text.replace(
+            '[Site "https://lichess.org/abcdef12"]', '[Site "https://lichess.org/zzzz9999"]'
+        )
         .replace('[White "WhitePlayer"]', '[White "Alice"]')
         .replace('[Black "BlackPlayer"]', '[Black "Bob"]')
         .replace('[Result "1-0"]', '[Result "0-1"]')
@@ -111,9 +112,8 @@ def test_parse_pgn_text_parses_multiple_games_in_one_text(sample_pgn_text: str) 
 def test_parse_pgn_text_winner_is_none_for_unexpected_result(sample_pgn_text: str) -> None:
     # Intentionally use a non-standard result string and keep it consistent in header + movetext.
     weird_result = "weird"
-    pgn = (
-        sample_pgn_text.replace('[Result "1-0"]', f'[Result "{weird_result}"]')
-        .replace(" 1-0\n", f" {weird_result}\n")
+    pgn = sample_pgn_text.replace('[Result "1-0"]', f'[Result "{weird_result}"]').replace(
+        " 1-0\n", f" {weird_result}\n"
     )
 
     result = parse_pgn_text(pgn)
@@ -215,5 +215,3 @@ def test_unknown_date_parses_to_none_and_game_kept(bad_date: str | None) -> None
     res = parse_pgn_text(pgn)
     assert len(res) == 1
     assert res[0]["date_played"] is None
-
-

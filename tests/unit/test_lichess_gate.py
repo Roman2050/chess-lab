@@ -181,10 +181,10 @@ async def test_lock_ttl_exceeds_total_timeout() -> None:
     async with lichess_request_gate(redis_client=redis):
         lock_ttl_ms = redis.ttls_ms[LICHESS_REQUEST_LOCK_KEY]
         assert lock_ttl_ms > settings.LICHESS_TOTAL_TIMEOUT_SECONDS * 1000
-        assert lock_ttl_ms == (
-            settings.LICHESS_TOTAL_TIMEOUT_SECONDS
-            + LOCK_SAFETY_MARGIN_SECONDS
-        ) * 1000
+        assert (
+            lock_ttl_ms
+            == (settings.LICHESS_TOTAL_TIMEOUT_SECONDS + LOCK_SAFETY_MARGIN_SECONDS) * 1000
+        )
 
 
 @pytest.mark.unit
@@ -200,8 +200,7 @@ async def test_active_cooldown_blocks_before_lock_acquire() -> None:
 
     assert exc_info.value.retry_after == 13
     assert not any(
-        event[0] == "set" and event[1] == LICHESS_REQUEST_LOCK_KEY
-        for event in redis.events
+        event[0] == "set" and event[1] == LICHESS_REQUEST_LOCK_KEY for event in redis.events
     )
 
 
@@ -233,9 +232,7 @@ async def test_cooldown_is_stored_before_lock_release() -> None:
         for index, event in enumerate(redis.events)
         if event[0] == "set" and event[1] == LICHESS_COOLDOWN_KEY
     )
-    release_index = next(
-        index for index, event in enumerate(redis.events) if event[0] == "eval"
-    )
+    release_index = next(index for index, event in enumerate(redis.events) if event[0] == "eval")
     assert cooldown_set_index < release_index
     assert redis.ttls_ms[LICHESS_COOLDOWN_KEY] == 75_000
 

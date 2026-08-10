@@ -63,9 +63,7 @@ def build_report_context(
     wp = compute_player_wp_loss(games_analyzed, player_name)
     accuracy = compute_accuracy_by_phase(games_analyzed, player_name)
     errors = compute_error_patterns(games_analyzed, player_name)
-    openings = compute_opening_stats(
-        games_all, player_name, limit=_OPENING_STATS_LIMIT
-    )
+    openings = compute_opening_stats(games_all, player_name, limit=_OPENING_STATS_LIMIT)
 
     played_dates = [g.date_played for g in games_all if g.date_played]
     last_game_played_at = max(played_dates) if played_dates else None
@@ -133,9 +131,7 @@ def _extreme_phase(phase_values: dict[str, float | None], *, weakest: bool) -> s
     Accepts a ``phase -> value`` mapping; only phases with a non-None value are
     considered. Returns ``None`` when no phase qualifies.
     """
-    candidates = [
-        (phase, value) for phase, value in phase_values.items() if value is not None
-    ]
+    candidates = [(phase, value) for phase, value in phase_values.items() if value is not None]
     if not candidates:
         return None
     chooser = max if weakest else min

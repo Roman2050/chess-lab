@@ -2,6 +2,7 @@
 from app.database import SyncSessionLocal
 from app.models.db import Game
 
+
 def main():
     db = SyncSessionLocal()
     try:

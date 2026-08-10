@@ -37,4 +37,3 @@ async def test_get_game_by_id_returns_404_when_missing(api_client):
     resp = await api_client.get("/api/v1/games/12345")
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Game not found"
-

@@ -107,9 +107,7 @@ def compute_player_wp_loss(games: list[Game], player_name: str) -> dict:
             "white": _mean_rounded(per_game_white_wp_losses),
             "black": _mean_rounded(per_game_black_wp_losses),
         },
-        "wp_loss_by_phase": {
-            phase: _mean_rounded(phase_losses[phase]) for phase in _PHASES
-        },
+        "wp_loss_by_phase": {phase: _mean_rounded(phase_losses[phase]) for phase in _PHASES},
     }
 
 

@@ -5,9 +5,10 @@ from app.config import (
     REPORT_LLM_MAX_RETRIES,
     REPORT_LLM_RETRY_BACKOFF_SECONDS,
     Settings,
+)
+from app.config import (
     settings as application_settings,
 )
-
 
 BASE_SETTINGS = {
     "DB_HOST": "localhost",
@@ -83,11 +84,7 @@ def test_mvp_api_key_is_hidden_from_settings_repr() -> None:
 @pytest.mark.unit
 def test_lichess_user_agent_is_required(monkeypatch) -> None:
     monkeypatch.delenv("LICHESS_USER_AGENT", raising=False)
-    values = {
-        key: value
-        for key, value in BASE_SETTINGS.items()
-        if key != "LICHESS_USER_AGENT"
-    }
+    values = {key: value for key, value in BASE_SETTINGS.items() if key != "LICHESS_USER_AGENT"}
 
     with pytest.raises(ValidationError) as exc_info:
         Settings(
@@ -302,10 +299,7 @@ def test_report_language_must_be_in_case_sensitive_allowed_set() -> None:
 @pytest.mark.unit
 def test_report_lease_covers_all_llm_attempts_and_backoff() -> None:
     llm_timeout = 120
-    minimum_lease = (
-        (REPORT_LLM_MAX_RETRIES + 1) * llm_timeout
-        + REPORT_LLM_RETRY_BACKOFF_SECONDS
-    )
+    minimum_lease = (REPORT_LLM_MAX_RETRIES + 1) * llm_timeout + REPORT_LLM_RETRY_BACKOFF_SECONDS
 
     with pytest.raises(ValidationError, match=f"minimum {minimum_lease}"):
         Settings(

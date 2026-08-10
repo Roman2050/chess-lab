@@ -137,9 +137,9 @@ def test_acpl_weighted() -> None:
         black_acpl = round((40 +  0) / 2) = 20
     """
     raw_moves = [
-        {"ply": 1, "san": "e4",  "color": "White", "eval_before":  30, "eval_after":  10},
-        {"ply": 2, "san": "e5",  "color": "Black", "eval_before":  10, "eval_after":  50},
-        {"ply": 3, "san": "Nf3", "color": "White", "eval_before":  50, "eval_after": -10},
+        {"ply": 1, "san": "e4", "color": "White", "eval_before": 30, "eval_after": 10},
+        {"ply": 2, "san": "e5", "color": "Black", "eval_before": 10, "eval_after": 50},
+        {"ply": 3, "san": "Nf3", "color": "White", "eval_before": 50, "eval_after": -10},
         {"ply": 4, "san": "Nc6", "color": "Black", "eval_before": -10, "eval_after": -30},
     ]
 
@@ -170,14 +170,20 @@ def test_best_move_engine_propagated_as_san_for_error_moves() -> None:
     raw_moves = [
         # cp_loss=60 → inaccuracy; engine recommends 1.e4.
         {
-            "ply": 1, "san": "Nf3", "color": "White",
-            "eval_before": 30, "eval_after": -30,
+            "ply": 1,
+            "san": "Nf3",
+            "color": "White",
+            "eval_before": 30,
+            "eval_after": -30,
             "best_move": "e2e4",
         },
         # cp_loss=0 → best; should stay lightweight.
         {
-            "ply": 2, "san": "e5", "color": "Black",
-            "eval_before": -30, "eval_after": -30,
+            "ply": 2,
+            "san": "e5",
+            "color": "Black",
+            "eval_before": -30,
+            "eval_after": -30,
             "best_move": "e7e5",
         },
     ]
@@ -203,13 +209,19 @@ def test_best_move_engine_falls_back_to_none_on_invalid_uci() -> None:
     raw_moves = [
         # Illegal in the starting position (no piece on h2 going to h5).
         {
-            "ply": 1, "san": "Nf3", "color": "White",
-            "eval_before": 30, "eval_after": -30,
+            "ply": 1,
+            "san": "Nf3",
+            "color": "White",
+            "eval_before": 30,
+            "eval_after": -30,
             "best_move": "h2h5",
         },
         {
-            "ply": 2, "san": "Nf6", "color": "Black",
-            "eval_before": -30, "eval_after": 80,
+            "ply": 2,
+            "san": "Nf6",
+            "color": "Black",
+            "eval_before": -30,
+            "eval_after": 80,
             "best_move": "not-a-uci-string",
         },
     ]
@@ -237,16 +249,16 @@ def test_acpl_handles_empty_move_list() -> None:
 # 4.O-O Nf6 5.d3 d6. Five plies in we're still developing; from ply 7 onward
 # four minors have left the back rank, so detect_phase flips to "middlegame".
 _PHASE_RAW_MOVES: list[dict] = [
-    {"ply": 1,  "san": "e4",  "color": "White", "eval_before": 0, "eval_after": 0},
-    {"ply": 2,  "san": "e5",  "color": "Black", "eval_before": 0, "eval_after": 0},
-    {"ply": 3,  "san": "Nf3", "color": "White", "eval_before": 0, "eval_after": 0},
-    {"ply": 4,  "san": "Nc6", "color": "Black", "eval_before": 0, "eval_after": 0},
-    {"ply": 5,  "san": "Bc4", "color": "White", "eval_before": 0, "eval_after": 0},
-    {"ply": 6,  "san": "Bc5", "color": "Black", "eval_before": 0, "eval_after": 0},
-    {"ply": 7,  "san": "O-O", "color": "White", "eval_before": 0, "eval_after": 0},
-    {"ply": 8,  "san": "Nf6", "color": "Black", "eval_before": 0, "eval_after": 0},
-    {"ply": 9,  "san": "d3",  "color": "White", "eval_before": 0, "eval_after": 0},
-    {"ply": 10, "san": "d6",  "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 1, "san": "e4", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 2, "san": "e5", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 3, "san": "Nf3", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 4, "san": "Nc6", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 5, "san": "Bc4", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 6, "san": "Bc5", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 7, "san": "O-O", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 8, "san": "Nf6", "color": "Black", "eval_before": 0, "eval_after": 0},
+    {"ply": 9, "san": "d3", "color": "White", "eval_before": 0, "eval_after": 0},
+    {"ply": 10, "san": "d6", "color": "Black", "eval_before": 0, "eval_after": 0},
 ]
 
 
@@ -292,8 +304,7 @@ def test_phase_consistency() -> None:
     _RANK: dict[str, int] = {"opening": 0, "middlegame": 1, "endgame": 2}
     moves = data["moves"]
 
-    for prev, curr in zip(moves, moves[1:]):
+    for prev, curr in zip(moves, moves[1:], strict=False):
         assert _RANK[curr["phase"]] >= _RANK[prev["phase"]], (
-            f"phase regressed at ply {curr['ply']}: "
-            f"{prev['phase']!r} → {curr['phase']!r}"
+            f"phase regressed at ply {curr['ply']}: {prev['phase']!r} → {curr['phase']!r}"
         )

@@ -23,7 +23,6 @@ from app.services.lichess_gate import (
     LICHESS_REQUEST_LOCK_KEY,
 )
 
-
 USERNAME = "someuser"
 URL = f"https://lichess.org/api/games/user/{USERNAME}"
 PGN_TEXT = (
@@ -49,8 +48,7 @@ def _lifecycle_records(caplog) -> list[logging.LogRecord]:
     return [
         record
         for record in caplog.records
-        if record.name == "app.services.lichess"
-        and record.getMessage() in LICHESS_LOG_EVENTS
+        if record.name == "app.services.lichess" and record.getMessage() in LICHESS_LOG_EVENTS
     ]
 
 
@@ -162,9 +160,7 @@ def isolated_lichess_gate(monkeypatch) -> GateRedis:
 @pytest.mark.asyncio
 async def test_request_sends_identity_accept_and_explicit_perf_query() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
 
         result = await fetch_games_from_lichess(
             username=USERNAME,
@@ -191,9 +187,7 @@ async def test_request_sends_identity_accept_and_explicit_perf_query() -> None:
 @pytest.mark.asyncio
 async def test_request_preserves_default_perf_type_query() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
 
         await fetch_games_from_lichess(
             username=USERNAME,
@@ -212,9 +206,7 @@ async def test_request_preserves_default_perf_type_query() -> None:
 async def test_request_url_encodes_username_path_segment() -> None:
     encoded_url = "https://lichess.org/api/games/user/name%2Fwith%20space"
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(encoded_url).mock(
-            return_value=httpx.Response(200, content=b"")
-        )
+        route = router.get(encoded_url).mock(return_value=httpx.Response(200, content=b""))
 
         assert await fetch_games_from_lichess("name/with space") == ""
 
@@ -231,9 +223,7 @@ async def test_request_sends_optional_bearer_token_without_logging_it(
     monkeypatch.setattr(settings, "LICHESS_API_TOKEN", SecretStr(token))
 
     with respx.mock(assert_all_called=True) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
         await fetch_games_from_lichess(USERNAME)
 
     assert route.calls[0].request.headers["Authorization"] == f"Bearer {token}"
@@ -247,9 +237,7 @@ async def test_network_error_does_not_expose_bearer_token(monkeypatch, caplog) -
     monkeypatch.setattr(settings, "LICHESS_API_TOKEN", SecretStr(token))
 
     with respx.mock(assert_all_called=True) as router:
-        router.get(URL).mock(
-            side_effect=httpx.ConnectError(f"connection failed: {token}")
-        )
+        router.get(URL).mock(side_effect=httpx.ConnectError(f"connection failed: {token}"))
 
         with pytest.raises(LichessUnavailableError) as exc_info:
             await fetch_games_from_lichess(USERNAME)
@@ -290,9 +278,7 @@ async def test_allowed_pgn_media_types_return_body_unchanged(content_type: str) 
 @pytest.mark.parametrize("headers", [{}, {"Content-Type": "text/plain"}])
 async def test_empty_success_body_is_allowed(headers: dict[str, str]) -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(URL).mock(
-            return_value=httpx.Response(200, headers=headers, content=b"")
-        )
+        router.get(URL).mock(return_value=httpx.Response(200, headers=headers, content=b""))
 
         assert await fetch_games_from_lichess(USERNAME) == ""
 
@@ -301,9 +287,7 @@ async def test_empty_success_body_is_allowed(headers: dict[str, str]) -> None:
 @pytest.mark.asyncio
 async def test_missing_content_type_accepts_pgn_like_body() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(URL).mock(
-            return_value=httpx.Response(200, content=PGN_TEXT.encode())
-        )
+        router.get(URL).mock(return_value=httpx.Response(200, content=PGN_TEXT.encode()))
 
         assert await fetch_games_from_lichess(USERNAME) == PGN_TEXT
 
@@ -312,9 +296,7 @@ async def test_missing_content_type_accepts_pgn_like_body() -> None:
 @pytest.mark.asyncio
 async def test_missing_content_type_rejects_non_pgn_body() -> None:
     with respx.mock(assert_all_called=True) as router:
-        router.get(URL).mock(
-            return_value=httpx.Response(200, content=b"service says hello")
-        )
+        router.get(URL).mock(return_value=httpx.Response(200, content=b"service says hello"))
 
         with pytest.raises(LichessProtocolError):
             await fetch_games_from_lichess(USERNAME)
@@ -505,9 +487,7 @@ async def test_upstream_429_sets_bounded_cooldown_before_lock_release(
         if event[0] == "set" and event[1] == LICHESS_COOLDOWN_KEY
     )
     release_index = next(
-        index
-        for index, event in enumerate(isolated_lichess_gate.events)
-        if event[0] == "eval"
+        index for index, event in enumerate(isolated_lichess_gate.events) if event[0] == "eval"
     )
     assert cooldown_index < release_index
 
@@ -521,9 +501,7 @@ async def test_request_during_cooldown_makes_no_upstream_call(
     isolated_lichess_gate.ttls_ms[LICHESS_COOLDOWN_KEY] = 42_001
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
 
         with pytest.raises(LichessRateLimitedError) as exc_info:
             await fetch_games_from_lichess(USERNAME)
@@ -572,9 +550,7 @@ async def test_redis_unavailable_makes_no_upstream_call(monkeypatch) -> None:
     )
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
 
         with pytest.raises(LichessCoordinationError):
             await fetch_games_from_lichess(USERNAME)
@@ -613,9 +589,7 @@ async def test_success_observability_contract_and_safe_metadata(
     import app.services.lichess as lichess_service
 
     original_username = "  Mixed/User "
-    encoded_url = (
-        "https://lichess.org/api/games/user/%20%20Mixed%2FUser%20"
-    )
+    encoded_url = "https://lichess.org/api/games/user/%20%20Mixed%2FUser%20"
     token = "lichess-observability-token-secret"
     monkeypatch.setattr(settings, "LICHESS_API_TOKEN", SecretStr(token))
     clock = iter([100.0, 100.25])
@@ -674,9 +648,7 @@ async def test_busy_observability_has_one_terminal_event(
     isolated_lichess_gate.ttls_ms[LICHESS_REQUEST_LOCK_KEY] = 10_000
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
         with pytest.raises(LichessBusyError):
             await fetch_games_from_lichess(USERNAME)
 
@@ -696,9 +668,7 @@ async def test_local_cooldown_observability_identifies_source(
     isolated_lichess_gate.ttls_ms[LICHESS_COOLDOWN_KEY] = 42_001
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
         with pytest.raises(LichessRateLimitedError):
             await fetch_games_from_lichess(USERNAME)
 
@@ -732,9 +702,7 @@ async def test_upstream_rate_limit_observability_identifies_source(
     assert terminal.rate_limit_source == "upstream"
     assert terminal.retry_after == 123
     assert terminal.upstream_http_status == 429
-    assert sensitive_body not in repr(
-        [record.__dict__ for record in _lifecycle_records(caplog)]
-    )
+    assert sensitive_body not in repr([record.__dict__ for record in _lifecycle_records(caplog)])
 
 
 @pytest.mark.unit
@@ -802,9 +770,7 @@ async def test_network_failure_observability_hides_original_exception(
     sensitive_exception = "SENSITIVE ORIGINAL NETWORK EXCEPTION"
 
     with respx.mock(assert_all_called=True) as router:
-        router.get(URL).mock(
-            side_effect=httpx.ConnectError(sensitive_exception)
-        )
+        router.get(URL).mock(side_effect=httpx.ConnectError(sensitive_exception))
         with pytest.raises(LichessUnavailableError):
             await fetch_games_from_lichess(USERNAME)
 
@@ -860,9 +826,7 @@ async def test_redis_failure_observability_family(
     _capture_lifecycle_events(caplog)
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
         with pytest.raises(LichessCoordinationError):
             await fetch_games_from_lichess(USERNAME)
 
@@ -891,9 +855,7 @@ async def test_release_failure_replaces_success_with_one_failed_terminal(
             key: str,
             owner_token: str,
         ) -> int:
-            raise ConnectionError(
-                f"SENSITIVE RELEASE EXCEPTION FOR {key}:{owner_token}"
-            )
+            raise ConnectionError(f"SENSITIVE RELEASE EXCEPTION FOR {key}:{owner_token}")
 
     monkeypatch.setattr(
         gate_module,
@@ -966,9 +928,7 @@ async def test_unexpected_failure_observability_hides_exception_text(
     _capture_lifecycle_events(caplog)
 
     with respx.mock(assert_all_called=False) as router:
-        route = router.get(URL).mock(
-            return_value=httpx.Response(200, text=PGN_TEXT)
-        )
+        route = router.get(URL).mock(return_value=httpx.Response(200, text=PGN_TEXT))
         with pytest.raises(RuntimeError, match=sensitive_exception):
             await fetch_games_from_lichess(USERNAME)
 

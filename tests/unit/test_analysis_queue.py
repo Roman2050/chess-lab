@@ -162,9 +162,7 @@ async def test_unanalyzed_ids_selects_claimable_statuses_only():
 
     assert ids == [7]
     sql = str(
-        captured[0].compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
+        captured[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     )
     assert "games.analysis_status IN ('pending', 'failed')" in sql
     assert "is_analyzed" not in sql
@@ -190,9 +188,7 @@ async def test_progress_query_is_case_insensitive():
 
     assert progress == {"total": 0, "analyzed": 0, "pending": 0}
     sql = str(
-        captured[0].compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
+        captured[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     )
     assert "lower(games.white_player) = lower('HeRo')" in sql
     assert "lower(games.black_player) = lower('HeRo')" in sql

@@ -6,7 +6,6 @@ import pytest
 
 from app.services.analysis.engine import StockfishEngine
 
-
 _PGN = "1. e4 e5 2. Nf3 Nc6"
 _EVALS = [10, 20, 30, 40, 50]
 _SECOND_EVALS = [-190, 220, -170, 240, -150]
@@ -17,15 +16,11 @@ def _analysis_infos() -> list[list[dict]]:
     return [
         [
             {
-                "score": chess.engine.PovScore(
-                    chess.engine.Cp(eval_cp), chess.WHITE
-                ),
+                "score": chess.engine.PovScore(chess.engine.Cp(eval_cp), chess.WHITE),
                 "pv": [chess.Move.from_uci(best_move)],
             },
             {
-                "score": chess.engine.PovScore(
-                    chess.engine.Cp(second_eval_cp), chess.WHITE
-                ),
+                "score": chess.engine.PovScore(chess.engine.Cp(second_eval_cp), chess.WHITE),
             },
         ]
         for eval_cp, second_eval_cp, best_move in zip(
@@ -69,7 +64,7 @@ def test_eval_chaining() -> None:
     assert [move["eval_after"] for move in result] == _EVALS[1:]
     assert all(
         current["eval_after"] == following["eval_before"]
-        for current, following in zip(result, result[1:])
+        for current, following in zip(result, result[1:], strict=False)
     )
 
 
@@ -114,9 +109,7 @@ def test_single_legal_move_no_second_pv() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize("pgn_content", ["", "this is not valid PGN"])
 def test_empty_and_unparseable_pgn(pgn_content: str) -> None:
-    with patch(
-        "app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci"
-    ) as popen_uci:
+    with patch("app.services.analysis.engine.chess.engine.SimpleEngine.popen_uci") as popen_uci:
         result = StockfishEngine("stockfish").analyse_game(pgn_content)
 
     assert result == []

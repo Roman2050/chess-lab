@@ -11,7 +11,6 @@ from pydantic import (
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
-
 GENERIC_HTTP_USER_AGENTS = (
     "aiohttp",
     "curl",
@@ -111,9 +110,7 @@ class Settings(BaseSettings):
         if "\r" in value or "\n" in value:
             raise ValueError("LICHESS_USER_AGENT must not contain CR or LF")
 
-        product = (
-            user_agent.casefold().split("/", maxsplit=1)[0].split(maxsplit=1)[0]
-        )
+        product = user_agent.casefold().split("/", maxsplit=1)[0].split(maxsplit=1)[0]
         if product in GENERIC_HTTP_USER_AGENTS:
             raise ValueError("LICHESS_USER_AGENT must identify the application")
         return user_agent
@@ -176,9 +173,7 @@ class Settings(BaseSettings):
                 or parsed.username is not None
                 or parsed.password is not None
             ):
-                raise ValueError(
-                    "CORS_ALLOWED_ORIGINS entries must be exact http(s) origins"
-                )
+                raise ValueError("CORS_ALLOWED_ORIGINS entries must be exact http(s) origins")
         return origins
 
     @model_validator(mode="after")
@@ -186,22 +181,17 @@ class Settings(BaseSettings):
         """Validate settings that depend on another setting."""
         if self.LICHESS_MIN_COOLDOWN_SECONDS > self.LICHESS_MAX_COOLDOWN_SECONDS:
             raise ValueError(
-                "LICHESS_MIN_COOLDOWN_SECONDS must not exceed "
-                "LICHESS_MAX_COOLDOWN_SECONDS"
+                "LICHESS_MIN_COOLDOWN_SECONDS must not exceed LICHESS_MAX_COOLDOWN_SECONDS"
             )
         if self.REPORT_LANGUAGE not in self.REPORT_ALLOWED_LANGUAGES:
-            raise ValueError(
-                "REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES"
-            )
+            raise ValueError("REPORT_LANGUAGE must be included in REPORT_ALLOWED_LANGUAGES")
         if self.FRONTEND_DEPLOYMENT_ENABLED and not self.CORS_ALLOWED_ORIGINS:
             raise ValueError(
-                "CORS_ALLOWED_ORIGINS must not be empty when frontend deployment "
-                "is enabled"
+                "CORS_ALLOWED_ORIGINS must not be empty when frontend deployment is enabled"
             )
         minimum_report_lease = (
-            (REPORT_LLM_MAX_RETRIES + 1) * self.LLM_TIMEOUT
-            + REPORT_LLM_RETRY_BACKOFF_SECONDS
-        )
+            REPORT_LLM_MAX_RETRIES + 1
+        ) * self.LLM_TIMEOUT + REPORT_LLM_RETRY_BACKOFF_SECONDS
         if self.REPORT_GENERATION_LEASE_SECONDS < minimum_report_lease:
             raise ValueError(
                 "REPORT_GENERATION_LEASE_SECONDS must cover all LLM attempts "
@@ -220,7 +210,7 @@ class Settings(BaseSettings):
             port=self.DB_PORT,
             database=self.DB_NAME,
         ).render_as_string(hide_password=False)
-    
+
     @computed_field
     @property
     def database_url_sync(self) -> str:
@@ -232,5 +222,6 @@ class Settings(BaseSettings):
             port=self.DB_PORT,
             database=self.DB_NAME,
         ).render_as_string(hide_password=False)
-    
+
+
 settings = Settings()

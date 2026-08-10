@@ -26,11 +26,16 @@ def test_developed_middlegame() -> None:
     """
     board = chess.Board()
     for san in (
-        "e4", "e5",
-        "Nf3", "Nc6",
-        "Bc4", "Bc5",
-        "O-O", "Nf6",
-        "d3", "d6",
+        "e4",
+        "e5",
+        "Nf3",
+        "Nc6",
+        "Bc4",
+        "Bc5",
+        "O-O",
+        "Nf6",
+        "d3",
+        "d6",
     ):
         board.push_san(san)
 
@@ -45,13 +50,20 @@ def test_late_opening_undeveloped() -> None:
     """
     board = chess.Board()
     for san in (
-        "a3", "a6",
-        "b3", "b6",
-        "c3", "c6",
-        "d3", "d6",
-        "e3", "e6",
-        "f3", "f6",
-        "g3", "g6",
+        "a3",
+        "a6",
+        "b3",
+        "b6",
+        "c3",
+        "c6",
+        "d3",
+        "d6",
+        "e3",
+        "e6",
+        "f3",
+        "f6",
+        "g3",
+        "g6",
     ):
         board.push_san(san)
 
@@ -87,9 +99,7 @@ def test_middlegame_with_queens_full_material() -> None:
     cutoff. Endgame rule doesn't fire (queens present, material=24); opening
     rule doesn't fire (ply > 20 AND development > threshold) → middlegame.
     """
-    board = chess.Board(
-        "r2qk2r/ppp1bppp/2nb1n2/3p4/3P4/2NB1N2/PPP1BPPP/R2QK2R w KQkq - 0 13"
-    )
+    board = chess.Board("r2qk2r/ppp1bppp/2nb1n2/3p4/3P4/2NB1N2/PPP1BPPP/R2QK2R w KQkq - 0 13")
 
     assert detect_phase(board, ply=25) == "middlegame"
 

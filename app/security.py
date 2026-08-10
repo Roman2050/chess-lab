@@ -11,7 +11,6 @@ from app.services.rate_limit import (
     consume_operation_quota,
 )
 
-
 mvp_api_key_header = APIKeyHeader(
     name="X-API-Key",
     auto_error=False,

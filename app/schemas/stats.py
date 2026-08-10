@@ -141,9 +141,7 @@ class PlayerStats(BaseModel):
                                 "error_pct": 28.1,
                             }
                         ],
-                        "errors_by_move_number": [
-                            {"move_num": 18, "error_count": 4}
-                        ],
+                        "errors_by_move_number": [{"move_num": 18, "error_count": 4}],
                     },
                 }
             ]

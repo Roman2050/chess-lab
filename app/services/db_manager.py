@@ -1,5 +1,6 @@
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.db import Game
 
 
@@ -10,7 +11,7 @@ async def bulk_save_games(db: AsyncSession, games_data: list[dict]) -> dict:
 
     stmt = insert(Game).values(games_data)
 
-    stmt = stmt.on_conflict_do_nothing(index_elements=['unique_id'])
+    stmt = stmt.on_conflict_do_nothing(index_elements=["unique_id"])
 
     result = await db.execute(stmt)
     await db.commit()

@@ -152,9 +152,7 @@ def test_strongest_phase_requires_significance() -> None:
 @pytest.mark.unit
 def test_weaker_color_wp_threshold() -> None:
     below = COLOR_BIAS_THRESHOLD - 0.1
-    near = derive_insights(
-        _wp(white=3.0, black=3.0 + below), _accuracy(), _errors(), []
-    )
+    near = derive_insights(_wp(white=3.0, black=3.0 + below), _accuracy(), _errors(), [])
     assert near.weaker_color is None
 
     far = derive_insights(
@@ -174,8 +172,16 @@ def test_derive_insights_dominant_piece_threshold() -> None:
     below = derive_insights(
         _wp(),
         _accuracy(),
-        _errors(by_piece=[{"piece": "Q", "piece_name": "Queen",
-                           "error_count": 2, "error_pct": DOMINANT_ERROR_PCT - 0.1}]),
+        _errors(
+            by_piece=[
+                {
+                    "piece": "Q",
+                    "piece_name": "Queen",
+                    "error_count": 2,
+                    "error_pct": DOMINANT_ERROR_PCT - 0.1,
+                }
+            ]
+        ),
         [],
     )
     assert below.dominant_error_piece is None
@@ -183,8 +189,16 @@ def test_derive_insights_dominant_piece_threshold() -> None:
     above = derive_insights(
         _wp(),
         _accuracy(),
-        _errors(by_piece=[{"piece": "Q", "piece_name": "Queen",
-                           "error_count": 5, "error_pct": DOMINANT_ERROR_PCT}]),
+        _errors(
+            by_piece=[
+                {
+                    "piece": "Q",
+                    "piece_name": "Queen",
+                    "error_count": 5,
+                    "error_pct": DOMINANT_ERROR_PCT,
+                }
+            ]
+        ),
         [],
     )
     assert above.dominant_error_piece == "Queen"
@@ -225,9 +239,17 @@ def _game(
     date_played: date | None = None,
 ) -> SimpleNamespace:
     moves = [
-        {"ply": 1, "move_num": 1, "color": "White", "cp_loss": 30,
-         "eval_before": 50, "eval_after": 20,
-         "phase": "opening", "classification": "good", "piece": "P"},
+        {
+            "ply": 1,
+            "move_num": 1,
+            "color": "White",
+            "cp_loss": 30,
+            "eval_before": 50,
+            "eval_after": 20,
+            "phase": "opening",
+            "classification": "good",
+            "piece": "P",
+        },
     ]
     return SimpleNamespace(
         id=game_id,

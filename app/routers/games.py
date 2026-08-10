@@ -15,6 +15,11 @@ from app.schemas.stats import (
     OpeningStat,
     PlayerStats,
 )
+from app.security import (
+    require_analysis_quota,
+    require_lichess_import_quota,
+    require_pgn_upload_quota,
+)
 from app.services.aggregation.accuracy import (
     compute_accuracy_by_phase,
     get_accuracy_by_move_number,
@@ -35,14 +40,8 @@ from app.services.lichess import (
     LichessUserNotFoundError,
     fetch_games_from_lichess,
 )
-from app.security import (
-    require_analysis_quota,
-    require_lichess_import_quota,
-    require_pgn_upload_quota,
-)
 from app.tasks.celery_app import analyze_game
 from app.utils.parser import parse_pgn_text
-
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -55,6 +54,7 @@ OPERATOR_ERROR_RESPONSES = {
     },
     503: {"description": "A required coordination or queue service is unavailable."},
 }
+
 
 @router.post(
     "/lichess/{username}",
@@ -76,10 +76,10 @@ OPERATOR_ERROR_RESPONSES = {
     },
 )
 async def load_from_lichess(
-    username: str, 
-    max_games: int = Query(50, ge=1, le=50, description="Number of games to upload (max 50)"), 
+    username: str,
+    max_games: int = Query(50, ge=1, le=50, description="Number of games to upload (max 50)"),
     perf_type: StandardPerfType | None = None,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Fetches games from the Lichess API for the specified user.
@@ -92,11 +92,7 @@ async def load_from_lichess(
             detail="Lichess import is already in progress",
         ) from None
     except LichessRateLimitedError as exc:
-        headers = (
-            {"Retry-After": str(exc.retry_after)}
-            if exc.retry_after is not None
-            else None
-        )
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
         raise HTTPException(
             status_code=429,
             detail="Lichess rate limit is active, retry later",
@@ -128,14 +124,13 @@ async def load_from_lichess(
     if not parsed_games:
         return UploadResponse(
             message=f"No standard games found for the user {username}.",
-            stats={"saved_new": 0, "total_processed": 0}
+            stats={"saved_new": 0, "total_processed": 0},
         )
 
     stats = await bulk_save_games(db, parsed_games)
-    
+
     return UploadResponse(
-        message=f"Games from Lichess have been successfully processed for {username}",
-        stats=stats
+        message=f"Games from Lichess have been successfully processed for {username}", stats=stats
     )
 
 
@@ -153,14 +148,13 @@ async def load_from_lichess(
     response_description="Upload outcome and number of games persisted.",
     responses={
         **OPERATOR_ERROR_RESPONSES,
-        400: {"description": "Missing filename, wrong extension, unreadable file, or invalid UTF-8."},
+        400: {
+            "description": "Missing filename, wrong extension, unreadable file, or invalid UTF-8."
+        },
         413: {"description": "The byte-size or parsed-game limit was exceeded."},
     },
 )
-async def upload_pgn_file(
-    file: UploadFile = File(...), 
-    db: AsyncSession = Depends(get_async_db)
-):
+async def upload_pgn_file(file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
     """
     Loads games from a standard .pgn file.
     """
@@ -169,7 +163,9 @@ async def upload_pgn_file(
 
     # File format validation
     if not file.filename.lower().endswith(".pgn"):
-        raise HTTPException(status_code=400, detail="Only files with the .pgn extension may be uploaded")
+        raise HTTPException(
+            status_code=400, detail="Only files with the .pgn extension may be uploaded"
+        )
 
     # Check size before reading into memory if provided by server/client
     if file.size is not None and file.size > MAX_UPLOAD_BYTES:
@@ -179,7 +175,7 @@ async def upload_pgn_file(
         # Read the file into memory
         content = await file.read()
     except Exception:
-        raise HTTPException(status_code=400, detail="Unable to read uploaded file")
+        raise HTTPException(status_code=400, detail="Unable to read uploaded file") from None
 
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File size exceeds maximum limit of 20MB")
@@ -187,7 +183,9 @@ async def upload_pgn_file(
     try:
         raw_pgn = content.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="File encoding error. UTF-8 is expected.")
+        raise HTTPException(
+            status_code=400, detail="File encoding error. UTF-8 is expected."
+        ) from None
 
     parsed_games = await asyncio.to_thread(parse_pgn_text, raw_pgn)
 
@@ -200,15 +198,13 @@ async def upload_pgn_file(
     if not parsed_games:
         return UploadResponse(
             message="No valid standard games were found in the file.",
-            stats={"saved_new": 0, "total_processed": 0}
+            stats={"saved_new": 0, "total_processed": 0},
         )
 
     stats = await bulk_save_games(db, parsed_games)
-    
-    return UploadResponse(
-        message=f"File {file.filename} successfully processed",
-        stats=stats
-    )
+
+    return UploadResponse(message=f"File {file.filename} successfully processed", stats=stats)
+
 
 @router.get(
     "",
@@ -225,21 +221,24 @@ async def get_games_list(
     limit: int = Query(50, ge=1, le=100, description="Number of games on the page"),
     offset: int = Query(0, ge=0, description="Skip elements (for pages)"),
     sort_order: SortOrder = Query(SortOrder.desc, description="Sort (newest or oldest)"),
-    player_name: str | None = Query(None, description="Filter by player nickname (played with white or black)"),
+    player_name: str | None = Query(
+        None, description="Filter by player nickname (played with white or black)"
+    ),
     winner: str | None = Query(None, description="Filter by winner (White, Black, Draw)"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     Get a list of games with pagination and filters (without heavy PGN text).
     """
     total, games = await get_filtered_games(db, limit, offset, sort_order, player_name, winner)
-    
+
     return PaginatedGames(
         total_count=total,
         limit=limit,
         offset=offset,
-        items=games # SQLAlchemy models will be automatically converted to GameSummary
+        items=games,  # SQLAlchemy models will be automatically converted to GameSummary
     )
+
 
 @router.get(
     "/{game_id}",
@@ -253,16 +252,13 @@ async def get_games_list(
     response_description="The requested game and its available analysis data.",
     responses={404: {"description": "Game not found."}},
 )
-async def get_game_by_id(
-    game_id: int, 
-    db: AsyncSession = Depends(get_async_db)
-):
+async def get_game_by_id(game_id: int, db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(select(Game).where(Game.id == game_id))
     game = result.scalar_one_or_none()
-    
+
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-        
+
     return game
 
 

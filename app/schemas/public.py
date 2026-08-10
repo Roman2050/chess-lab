@@ -83,6 +83,4 @@ class HealthStatus(BaseModel):
 class ReadinessStatus(HealthStatus):
     redis: str
 
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"status": "ok", "redis": "ok"}]}
-    )
+    model_config = ConfigDict(json_schema_extra={"examples": [{"status": "ok", "redis": "ok"}]})

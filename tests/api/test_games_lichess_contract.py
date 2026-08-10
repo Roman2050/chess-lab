@@ -124,9 +124,7 @@ async def test_lichess_route_429_includes_bounded_retry_after(
 
     resp = await api_client.post("/api/v1/games/lichess/u?max_games=1")
     assert resp.status_code == 429
-    assert resp.json() == {
-        "detail": "Lichess rate limit is active, retry later"
-    }
+    assert resp.json() == {"detail": "Lichess rate limit is active, retry later"}
     assert resp.headers["Retry-After"] == "73"
 
 
@@ -195,4 +193,3 @@ async def test_lichess_route_returns_no_standard_games_when_parser_empty(api_cli
     assert body["message"] == "No standard games found for the user u."
     assert body["stats"]["saved_new"] == 0
     assert body["stats"]["total_processed"] == 0
-
