@@ -163,6 +163,32 @@ as separate visible gates against a disposable PostgreSQL service. It builds the
 ignored local ECO dictionary from the official source before running tests. Automated
 tests mock the Lichess API and never spend its quota.
 
+## Production image
+
+Build the single Linux x86-64 image with explicit release identity:
+
+```bash
+docker build --platform linux/amd64 \
+  --build-arg OCI_SOURCE=https://github.com/Roman2050/chess-lab \
+  --build-arg OCI_REVISION="$(git rev-parse HEAD)" \
+  --build-arg OCI_VERSION=0.1.0 \
+  --tag chess-lab:0.1.0 .
+```
+
+The image defaults to the Uvicorn API command. Override the command to run either
+Celery queue or the one-shot migration job:
+
+```bash
+docker run --rm chess-lab:0.1.0 celery -A app.tasks.celery_app.celery_app worker -Q analysis --concurrency=1 --loglevel=info
+docker run --rm chess-lab:0.1.0 celery -A app.tasks.celery_app.celery_app worker -Q reports --concurrency=1 --loglevel=info
+docker run --rm chess-lab:0.1.0 alembic upgrade head
+```
+
+Runtime configuration is supplied through environment variables or an external
+environment file; no secrets are included in the image. The generated ECO dictionary
+and Stockfish 18 are already present, and the complete project license and third-party
+notices are stored in `/usr/share/licenses/chess-lab/`.
+
 ## Operations and safety
 
 Lichess imports use a stable application `User-Agent`, an optional server-side
