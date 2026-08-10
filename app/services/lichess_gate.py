@@ -17,7 +17,6 @@ from app.services.lichess_errors import (
     LichessRateLimitedError,
 )
 
-
 LICHESS_REQUEST_LOCK_KEY = "chess-lab:lichess:request-lock"
 LICHESS_COOLDOWN_KEY = "chess-lab:lichess:cooldown"
 LOCK_SAFETY_MARGIN_SECONDS = 15
@@ -108,9 +107,7 @@ async def _active_cooldown(
     try:
         ttl_ms = int(await redis_client.pttl(LICHESS_COOLDOWN_KEY))
     except Exception as exc:
-        raise LichessCoordinationError(
-            "Redis Lichess coordination is unavailable"
-        ) from exc
+        raise LichessCoordinationError("Redis Lichess coordination is unavailable") from exc
 
     if ttl_ms == -2:
         return None
@@ -133,10 +130,7 @@ async def _raise_if_cooling_down(redis_client: _RedisClient) -> None:
 
 
 def _lock_ttl_ms() -> int:
-    return math.ceil(
-        (settings.LICHESS_TOTAL_TIMEOUT_SECONDS + LOCK_SAFETY_MARGIN_SECONDS)
-        * 1000
-    )
+    return math.ceil((settings.LICHESS_TOTAL_TIMEOUT_SECONDS + LOCK_SAFETY_MARGIN_SECONDS) * 1000)
 
 
 async def _acquire_lock(redis_client: _RedisClient, owner_token: str) -> None:
@@ -148,9 +142,7 @@ async def _acquire_lock(redis_client: _RedisClient, owner_token: str) -> None:
             px=_lock_ttl_ms(),
         )
     except Exception as exc:
-        raise LichessCoordinationError(
-            "Redis Lichess coordination is unavailable"
-        ) from exc
+        raise LichessCoordinationError("Redis Lichess coordination is unavailable") from exc
 
     if not acquired:
         raise LichessBusyError
@@ -165,9 +157,7 @@ async def _release_lock(redis_client: _RedisClient, owner_token: str) -> None:
             owner_token,
         )
     except Exception as exc:
-        raise LichessCoordinationError(
-            "Redis Lichess coordination is unavailable"
-        ) from exc
+        raise LichessCoordinationError("Redis Lichess coordination is unavailable") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,9 +181,7 @@ class LichessRequestGate:
                 ex=wait_seconds,
             )
         except Exception as exc:
-            raise LichessCoordinationError(
-                "Redis Lichess coordination is unavailable"
-            ) from exc
+            raise LichessCoordinationError("Redis Lichess coordination is unavailable") from exc
         if not stored:
             raise LichessCoordinationError("Redis rejected the Lichess cooldown")
         return wait_seconds

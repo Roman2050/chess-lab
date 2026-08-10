@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class StandardPerfType(str, Enum):
     ultraBullet = "ultraBullet"
     bullet = "bullet"

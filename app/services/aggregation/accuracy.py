@@ -127,9 +127,7 @@ async def get_accuracy_by_move_number(
             "move_num": move_num,
             "games_count": games_count,
             "avg_cp_loss": round(sum(cp_losses) / n, 1),
-            "avg_wp_loss": (
-                round(sum(wp_losses) / len(wp_losses), 2) if wp_losses else None
-            ),
+            "avg_wp_loss": (round(sum(wp_losses) / len(wp_losses), 2) if wp_losses else None),
         }
         row.update(_error_rates(classifications, n))
         rows.append(row)

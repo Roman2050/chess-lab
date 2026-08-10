@@ -76,18 +76,14 @@ async def test_redis_failure_returns_503_before_business_logic(
     import app.security as security
 
     consume = AsyncMock(side_effect=RateLimitUnavailableError("unavailable"))
-    count_games = AsyncMock(
-        side_effect=AssertionError("Report service must not be called")
-    )
+    count_games = AsyncMock(side_effect=AssertionError("Report service must not be called"))
     monkeypatch.setattr(security, "consume_operation_quota", consume)
     monkeypatch.setattr(report_router, "count_analyzed_games", count_games)
 
     response = await async_client.post("/api/v1/report/operator", headers=auth_headers)
 
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Operation quota service is unavailable, try again later"
-    }
+    assert response.json() == {"detail": "Operation quota service is unavailable, try again later"}
     consume.assert_awaited_once_with(RateLimitOperation.REPORT)
     count_games.assert_not_awaited()
 

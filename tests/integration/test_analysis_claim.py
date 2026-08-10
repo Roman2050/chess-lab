@@ -55,9 +55,7 @@ async def test_two_concurrent_claims_one_winner(async_session, sync_session_fact
     def _claim_from_other_connection() -> None:
         session = sync_session_factory()
         try:
-            loser_result["pgn"] = session.execute(
-                _claim_stmt(game_id)
-            ).scalar_one_or_none()
+            loser_result["pgn"] = session.execute(_claim_stmt(game_id)).scalar_one_or_none()
             session.commit()
         finally:
             session.close()
@@ -135,7 +133,5 @@ async def test_failed_game_is_claimable_again(async_session, sync_session_factor
     assert row.analysis_status == "running"
     assert row.analysis_attempts == 2
 
-    error = await async_session.scalar(
-        select(Game.analysis_error).where(Game.id == game_id)
-    )
+    error = await async_session.scalar(select(Game.analysis_error).where(Game.id == game_id))
     assert error is None

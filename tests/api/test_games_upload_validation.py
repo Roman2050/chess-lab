@@ -1,6 +1,6 @@
-import os
 import httpx
 import pytest
+
 from app.database import get_async_db
 
 
@@ -195,5 +195,3 @@ async def test_upload_without_filename_400(api_client):
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Filename is required"
-
-

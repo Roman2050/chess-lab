@@ -106,9 +106,7 @@ async def upsert_generating(
     Commits: the FastAPI session dependency never does, and the worker must not
     start before the ``generating`` row is visible to other requests.
     """
-    claimed = await db.scalar(
-        generating_claim_stmt(player_name, language, analyzed_games_count)
-    )
+    claimed = await db.scalar(generating_claim_stmt(player_name, language, analyzed_games_count))
     await db.commit()
     return claimed is not None
 

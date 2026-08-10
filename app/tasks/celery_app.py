@@ -150,8 +150,7 @@ def _mark_analysis_failed(game_id: int, exc: Exception) -> None:
             )
     except Exception:
         logger.exception(
-            "analyze_game: could not record failure for game_id=%s "
-            "(row stays 'running')",
+            "analyze_game: could not record failure for game_id=%s (row stays 'running')",
             game_id,
         )
 
@@ -286,8 +285,7 @@ def generate_player_report(
         # Nothing analyzed yet → no facts to narrate; don't poke the model.
         if ctx.analyzed_games_count == 0:
             logger.warning(
-                "generate_player_report: no analyzed games for player=%s, "
-                "marking failed",
+                "generate_player_report: no analyzed games for player=%s, marking failed",
                 player_name,
             )
             _mark_report_failed(player_name, language)

@@ -34,9 +34,7 @@ def _completion_response(content: str) -> httpx.Response:
 @pytest.mark.unit
 def test_generate_builds_correct_request() -> None:
     with respx.mock(assert_all_called=True) as router:
-        route = router.post(COMPLETIONS_URL).mock(
-            return_value=_completion_response("ok")
-        )
+        route = router.post(COMPLETIONS_URL).mock(return_value=_completion_response("ok"))
 
         result = _make_provider().generate(system="SYS", user="USR")
 
@@ -112,8 +110,7 @@ def test_generate_includes_structured_error_message_on_http_400() -> None:
             _make_provider().generate(system="s", user="u")
 
     assert str(exc_info.value) == (
-        "LLM request failed with status 400: "
-        "Unsupported parameter: 'temperature'"
+        "LLM request failed with status 400: Unsupported parameter: 'temperature'"
     )
 
 
@@ -152,9 +149,7 @@ def test_generate_truncates_structured_error_message() -> None:
         with pytest.raises(LLMError) as exc_info:
             _make_provider().generate(system="s", user="u")
 
-    assert str(exc_info.value) == (
-        f"LLM request failed with status 400: {'x' * 500}..."
-    )
+    assert str(exc_info.value) == (f"LLM request failed with status 400: {'x' * 500}...")
 
 
 @pytest.mark.unit

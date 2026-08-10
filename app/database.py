@@ -1,20 +1,17 @@
 from contextlib import contextmanager
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import sessionmaker, declarative_base
-from app.config import settings
 
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+from app.config import settings
 
 DATABASE_URL_ASYNC = settings.database_url_async
 DATABASE_URL_SYNC = settings.database_url_sync
 
 
 async_engine = create_async_engine(
-    DATABASE_URL_ASYNC,
-    pool_pre_ping=True,
-    echo=False,         
-    pool_size=5,        
-    max_overflow=10     
+    DATABASE_URL_ASYNC, pool_pre_ping=True, echo=False, pool_size=5, max_overflow=10
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -35,13 +32,8 @@ async def get_async_db():
             await session.close()
 
 
-
 sync_engine = create_engine(
-    DATABASE_URL_SYNC,
-    pool_pre_ping=True,
-    echo=False,
-    pool_size=5,
-    max_overflow=10
+    DATABASE_URL_SYNC, pool_pre_ping=True, echo=False, pool_size=5, max_overflow=10
 )
 
 SyncSessionLocal = sessionmaker(
@@ -49,6 +41,7 @@ SyncSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
 
 @contextmanager
 def get_sync_db_session():

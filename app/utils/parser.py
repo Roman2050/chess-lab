@@ -1,6 +1,6 @@
-from datetime import date, datetime
 import hashlib
 import io
+from datetime import date, datetime
 
 import chess
 import chess.pgn
@@ -75,13 +75,15 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
         if "lichess.org/" in site:
             unique_id = site.split("/")[-1]
         else:
-            raw_data = "|".join([
-                headers.get("White", ""),
-                headers.get("Black", ""),
-                headers.get("Date", ""),
-                headers.get("Result", ""),
-                clean_pgn,
-            ])
+            raw_data = "|".join(
+                [
+                    headers.get("White", ""),
+                    headers.get("Black", ""),
+                    headers.get("Date", ""),
+                    headers.get("Result", ""),
+                    clean_pgn,
+                ]
+            )
             unique_id = hashlib.sha256(raw_data.encode("utf-8")).hexdigest()
 
         result = headers.get("Result", "*")
@@ -101,16 +103,18 @@ def parse_pgn_text(pgn_text: str) -> list[dict]:
         else:
             opening_name = _resolve_opening_name(game, eco_lookup)
 
-        games_data.append({
-            "unique_id": unique_id,
-            "white_player": headers.get("White", "Unknown"),
-            "black_player": headers.get("Black", "Unknown"),
-            "result": result,
-            "winner": winner,
-            "date_played": _parse_pgn_date(headers.get("Date")),
-            "opening_name": opening_name,
-            "time_control": headers.get("TimeControl", None),
-            "pgn_content": clean_pgn,
-        })
+        games_data.append(
+            {
+                "unique_id": unique_id,
+                "white_player": headers.get("White", "Unknown"),
+                "black_player": headers.get("Black", "Unknown"),
+                "result": result,
+                "winner": winner,
+                "date_played": _parse_pgn_date(headers.get("Date")),
+                "opening_name": opening_name,
+                "time_control": headers.get("TimeControl", None),
+                "pgn_content": clean_pgn,
+            }
+        )
 
     return games_data

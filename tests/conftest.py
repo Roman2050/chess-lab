@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-
 # IMPORTANT: The app config is loaded at import time (Settings()) and requires
 # DB_*, MVP_API_KEY, and LICHESS_USER_AGENT. Tests use dedicated non-production
 # values and set all required settings before importing any application module.

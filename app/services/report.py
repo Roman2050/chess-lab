@@ -31,11 +31,7 @@ def decide_report_action(
     the worker that claimed it died, and nothing else will ever move it on, so
     the row is treated as not in flight and the ordinary count rules apply.
     """
-    if (
-        report is not None
-        and report.status == "generating"
-        and not generation_is_stale
-    ):
+    if report is not None and report.status == "generating" and not generation_is_stale:
         return ReportAction.ALREADY_GENERATING
 
     # No usable report yet (missing row, or a deleted/unfinished text): the

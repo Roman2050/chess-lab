@@ -103,9 +103,7 @@ def _patch_analyzed_games(monkeypatch: pytest.MonkeyPatch, module: str, games: l
     async def _fake(db, player_name, time_control=None):
         return games
 
-    monkeypatch.setattr(
-        f"app.services.aggregation.{module}.get_player_analyzed_games", _fake
-    )
+    monkeypatch.setattr(f"app.services.aggregation.{module}.get_player_analyzed_games", _fake)
 
 
 def _patch_player_games(monkeypatch: pytest.MonkeyPatch, games: list) -> None:
@@ -209,9 +207,7 @@ async def test_acpl_clamps_mate_inflated_moves(monkeypatch, fake_games, db) -> N
         clamped game ACPL = (9*10 + 1000) / 10 = 109.0
     """
     moves = _moves(9, cp_loss=10)
-    moves.append(
-        _make_move(ply=19, move_num=10, cp_loss=10050, classification="blunder")
-    )
+    moves.append(_make_move(ply=19, move_num=10, cp_loss=10050, classification="blunder"))
     games = fake_games({"moves": moves})
     _patch_analyzed_games(monkeypatch, "acpl", games)
 
@@ -244,9 +240,7 @@ async def test_acpl_empty_player(monkeypatch, db) -> None:
 
 
 @pytest.mark.unit
-async def test_accuracy_by_phase_separate_error_rates(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_accuracy_by_phase_separate_error_rates(monkeypatch, fake_games, db) -> None:
     """1 inaccuracy + 1 mistake + 1 blunder + 7 good out of 10 opening moves
     must produce three *separate* 10% rates — not a fused error_rate."""
     classifications = ["inaccuracy", "mistake", "blunder"] + ["good"] * 7
@@ -274,9 +268,7 @@ async def test_accuracy_by_phase_separate_error_rates(
 
 
 @pytest.mark.unit
-async def test_accuracy_by_move_number_min_games_filter(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_accuracy_by_move_number_min_games_filter(monkeypatch, fake_games, db) -> None:
     """move 15 appears in 10 games, move 40 in only 3 — min_games decides
     whether the rare move number survives."""
     specs = []
@@ -296,9 +288,7 @@ async def test_accuracy_by_move_number_min_games_filter(
 
 
 @pytest.mark.unit
-async def test_accuracy_by_move_number_no_phase_field(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_accuracy_by_move_number_no_phase_field(monkeypatch, fake_games, db) -> None:
     """Rows deliberately carry no "phase" key — the same move number can land
     in different phases across games (see Chat 5 / accuracy.py docstring)."""
     games = fake_games(
@@ -318,9 +308,7 @@ async def test_accuracy_by_move_number_no_phase_field(
 
 
 @pytest.mark.unit
-async def test_accuracy_by_move_number_includes_wp_loss(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_accuracy_by_move_number_includes_wp_loss(monkeypatch, fake_games, db) -> None:
     """Moves carrying evals produce an avg_wp_loss (float, >= 0) without
     dropping the pre-existing avg_cp_loss field (contract stays additive)."""
     games = fake_games(
@@ -370,9 +358,7 @@ async def test_accuracy_by_move_number_excludes_decided_position_wp(
 
 
 @pytest.mark.unit
-async def test_accuracy_by_move_number_wp_none_without_evals(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_accuracy_by_move_number_wp_none_without_evals(monkeypatch, fake_games, db) -> None:
     """Moves lacking evals → avg_wp_loss is None, but the row is still emitted
     (avg_cp_loss keeps the row alive)."""
     games = fake_games({"moves": [_make_move(ply=1, move_num=1, cp_loss=60)]})
@@ -439,9 +425,7 @@ async def test_opening_stats_win_rate_rounding(monkeypatch, fake_games, db) -> N
 
 
 @pytest.mark.unit
-async def test_opening_stats_acpl_only_from_analyzed(
-    monkeypatch, fake_games, db
-) -> None:
+async def test_opening_stats_acpl_only_from_analyzed(monkeypatch, fake_games, db) -> None:
     """acpl_in_opening uses only the 3 analyzed games; the 2 unanalyzed ones
     still count toward games_count."""
     analyzed_specs = [
@@ -508,9 +492,7 @@ async def test_error_patterns_piece_mapping(monkeypatch, fake_games, db) -> None
         )
         for i in range(3)
     ]
-    moves.append(
-        _make_move(ply=9, move_num=5, piece="N", cp_loss=400, classification="blunder")
-    )
+    moves.append(_make_move(ply=9, move_num=5, piece="N", cp_loss=400, classification="blunder"))
     games = fake_games({"moves": moves})
     _patch_analyzed_games(monkeypatch, "errors", games)
 

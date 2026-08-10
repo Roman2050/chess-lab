@@ -9,7 +9,6 @@ from redis.asyncio import Redis
 
 from app.config import settings
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -125,9 +124,7 @@ async def consume_operation_quota(
             operation.value,
             fingerprint,
         )
-        raise RateLimitUnavailableError(
-            "Redis rate-limit backend is unavailable"
-        ) from exc
+        raise RateLimitUnavailableError("Redis rate-limit backend is unavailable") from exc
 
     allowed = count <= limit
     logger.log(

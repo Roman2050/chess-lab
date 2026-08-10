@@ -17,9 +17,7 @@ router = APIRouter(prefix="/analyze")
 
 OPERATOR_ERROR_RESPONSES = {
     401: {"description": "Missing or invalid operator API key."},
-    429: {
-        "description": "Analysis quota exhausted. Retry after the seconds in `Retry-After`."
-    },
+    429: {"description": "Analysis quota exhausted. Retry after the seconds in `Retry-After`."},
     503: {"description": "The quota backend is unavailable."},
 }
 

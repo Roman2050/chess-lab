@@ -25,10 +25,7 @@ def _report(
 
 @pytest.mark.unit
 def test_no_report_insufficient():
-    assert (
-        decide_report_action(5, None, THRESHOLD)
-        == ReportAction.INSUFFICIENT_GAMES
-    )
+    assert decide_report_action(5, None, THRESHOLD) == ReportAction.INSUFFICIENT_GAMES
 
 
 @pytest.mark.unit
@@ -57,10 +54,7 @@ def test_existing_at_threshold():
 @pytest.mark.unit
 def test_already_generating():
     report = _report(status="generating", report_text=None)
-    assert (
-        decide_report_action(100, report, THRESHOLD)
-        == ReportAction.ALREADY_GENERATING
-    )
+    assert decide_report_action(100, report, THRESHOLD) == ReportAction.ALREADY_GENERATING
 
 
 @pytest.mark.unit

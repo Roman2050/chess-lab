@@ -123,4 +123,3 @@ async def test_get_filtered_games_filters_and_paginates(
     )
     assert total == 3
     assert len(games) == 1
-

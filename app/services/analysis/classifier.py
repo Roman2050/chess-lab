@@ -129,13 +129,9 @@ def _advantage_flags(
     final_eval_cp: int,
 ) -> dict[str, bool]:
     """Did either side reach a clear edge but fail to keep it?"""
-    white_lost = (
-        white_peak_cp >= _ADVANTAGE_THRESHOLD_CP
-        and final_eval_cp < _RETAINED_THRESHOLD_CP
-    )
+    white_lost = white_peak_cp >= _ADVANTAGE_THRESHOLD_CP and final_eval_cp < _RETAINED_THRESHOLD_CP
     black_lost = (
-        black_peak_cp <= -_ADVANTAGE_THRESHOLD_CP
-        and final_eval_cp > -_RETAINED_THRESHOLD_CP
+        black_peak_cp <= -_ADVANTAGE_THRESHOLD_CP and final_eval_cp > -_RETAINED_THRESHOLD_CP
     )
     return {"white": white_lost, "black": black_lost}
 
@@ -183,9 +179,7 @@ def build_analysis_data(moves: list[dict]) -> dict:
         eval_before = int(raw["eval_before"])
         eval_after = int(raw["eval_after"])
         raw_second_eval = raw.get("second_eval_cp")
-        second_eval_cp = (
-            int(raw_second_eval) if raw_second_eval is not None else None
-        )
+        second_eval_cp = int(raw_second_eval) if raw_second_eval is not None else None
 
         cp_loss = _cp_loss_for_move(color, eval_before, eval_after)
         classification = classify_move(cp_loss)
@@ -199,7 +193,12 @@ def build_analysis_data(moves: list[dict]) -> dict:
         try:
             move_obj = board.parse_san(san)
             board.push(move_obj)
-        except (ValueError, chess.IllegalMoveError, chess.InvalidMoveError, chess.AmbiguousMoveError):
+        except (
+            ValueError,
+            chess.IllegalMoveError,
+            chess.InvalidMoveError,
+            chess.AmbiguousMoveError,
+        ):
             # Defensive: if SAN is unparseable we still emit the entry but
             # stop trying to advance the board to avoid cascading errors.
             move_obj = None
@@ -225,9 +224,7 @@ def build_analysis_data(moves: list[dict]) -> dict:
 
         if classification in _ERROR_CLASSES:
             best_move_obj = _parse_best_move(raw.get("best_move"), board_before)
-            best_move_san = (
-                board_before.san(best_move_obj) if best_move_obj is not None else None
-            )
+            best_move_san = board_before.san(best_move_obj) if best_move_obj is not None else None
 
             tactical_tags: list[str] = []
             if move_obj is not None:
@@ -277,9 +274,7 @@ def build_analysis_data(moves: list[dict]) -> dict:
         "summary": {
             "white_acpl": white_acpl,
             "black_acpl": black_acpl,
-            "advantage_lost": _advantage_flags(
-                white_peak_cp, black_peak_cp, final_eval_cp
-            ),
+            "advantage_lost": _advantage_flags(white_peak_cp, black_peak_cp, final_eval_cp),
             "phase_boundaries": {
                 "opening_end_ply": opening_end_ply,
                 "middlegame_end_ply": middlegame_end_ply,

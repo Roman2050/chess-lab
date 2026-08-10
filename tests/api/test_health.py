@@ -39,4 +39,3 @@ async def test_ready_endpoint_reports_redis_status(async_client, monkeypatch):
     assert (await async_client.get("/health")).status_code == 200
     assert readiness.await_count == 2
     lichess_fetch.assert_not_awaited()
-

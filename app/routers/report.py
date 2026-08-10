@@ -31,9 +31,7 @@ REPORT_LANGUAGE_RESPONSE = {
 }
 OPERATOR_ERROR_RESPONSES = {
     401: {"description": "Missing or invalid operator API key."},
-    429: {
-        "description": "Report quota exhausted. Retry after the seconds in `Retry-After`."
-    },
+    429: {"description": "Report quota exhausted. Retry after the seconds in `Retry-After`."},
     503: {"description": "The quota backend or report queue is unavailable."},
 }
 
@@ -104,9 +102,7 @@ async def request_report(
     match action:
         case ReportAction.GENERATE:
             try:
-                await asyncio.to_thread(
-                    generate_player_report.delay, username, language
-                )
+                await asyncio.to_thread(generate_player_report.delay, username, language)
             except Exception as exc:
                 # The row is already `generating` but no task will ever finish
                 # it, so hand the claim back instead of blocking the player
@@ -132,9 +128,7 @@ async def request_report(
         case ReportAction.INSUFFICIENT_GAMES:
             response.status_code = status.HTTP_200_OK
             games_until_next_report = threshold - current
-            message = (
-                f"Not enough analyzed games (need {threshold}, have {current})"
-            )
+            message = f"Not enough analyzed games (need {threshold}, have {current})"
 
     return ReportRequestResponse(
         player=username,
@@ -177,9 +171,7 @@ async def read_report(
         )
 
     current = await count_analyzed_games(db, username)
-    is_stale = (
-        current - report.analyzed_games_count
-    ) >= settings.REPORT_REFRESH_THRESHOLD
+    is_stale = (current - report.analyzed_games_count) >= settings.REPORT_REFRESH_THRESHOLD
 
     return ReportResponse(
         player=username,
@@ -230,9 +222,7 @@ async def read_report_status(
 
     has_report = report.report_text is not None
     games_until_next_report = (
-        threshold - (current - report.analyzed_games_count)
-        if has_report
-        else threshold - current
+        threshold - (current - report.analyzed_games_count) if has_report else threshold - current
     )
 
     return ReportStatusResponse(

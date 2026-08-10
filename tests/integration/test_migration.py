@@ -92,9 +92,7 @@ async def test_case_insensitive_migration_rejects_report_duplicates(async_sessio
     )
 
     try:
-        await async_session.execute(
-            text("DROP INDEX uq_player_reports_player_lang_lower")
-        )
+        await async_session.execute(text("DROP INDEX uq_player_reports_player_lang_lower"))
         await async_session.execute(
             text(
                 """
@@ -135,21 +133,15 @@ async def test_case_insensitive_functional_index_definitions(async_session):
             """
         )
     )
-    definitions = {
-        name: " ".join(indexdef.lower().split()) for name, indexdef in result.all()
-    }
+    definitions = {name: " ".join(indexdef.lower().split()) for name, indexdef in result.all()}
 
     assert set(definitions) == {
         "ix_games_white_player_lower",
         "ix_games_black_player_lower",
         "uq_player_reports_player_lang_lower",
     }
-    assert "lower((white_player)::text)" in definitions[
-        "ix_games_white_player_lower"
-    ]
-    assert "lower((black_player)::text)" in definitions[
-        "ix_games_black_player_lower"
-    ]
+    assert "lower((white_player)::text)" in definitions["ix_games_white_player_lower"]
+    assert "lower((black_player)::text)" in definitions["ix_games_black_player_lower"]
     report_index = definitions["uq_player_reports_player_lang_lower"]
     assert report_index.startswith("create unique index")
     assert "(lower((player_name)::text), language)" in report_index

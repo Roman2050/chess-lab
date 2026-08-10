@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,12 +51,16 @@ async def get_player_games(
     output for the analyzed subset. ``pgn_content`` is not (see
     :data:`_STAT_LOAD_OPTIONS`).
     """
-    stmt = select(Game).where(
-        or_(
-            func.lower(Game.white_player) == func.lower(player_name),
-            func.lower(Game.black_player) == func.lower(player_name),
-        ),
-    ).options(*_STAT_LOAD_OPTIONS)
+    stmt = (
+        select(Game)
+        .where(
+            or_(
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
+            ),
+        )
+        .options(*_STAT_LOAD_OPTIONS)
+    )
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -83,13 +87,17 @@ async def get_player_analyzed_games(
     Loads ``analysis_data`` but not ``pgn_content`` (see
     :data:`_STAT_LOAD_OPTIONS`).
     """
-    stmt = select(Game).where(
-        or_(
-            func.lower(Game.white_player) == func.lower(player_name),
-            func.lower(Game.black_player) == func.lower(player_name),
-        ),
-        Game.is_analyzed.is_(True),
-    ).options(*_STAT_LOAD_OPTIONS)
+    stmt = (
+        select(Game)
+        .where(
+            or_(
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
+            ),
+            Game.is_analyzed.is_(True),
+        )
+        .options(*_STAT_LOAD_OPTIONS)
+    )
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -112,12 +120,16 @@ def get_player_games_sync(
     This is the single fetch behind the whole report context, so the deferred
     ``pgn_content`` matters most here: the task holds a session while it runs.
     """
-    stmt = select(Game).where(
-        or_(
-            func.lower(Game.white_player) == func.lower(player_name),
-            func.lower(Game.black_player) == func.lower(player_name),
-        ),
-    ).options(*_STAT_LOAD_OPTIONS)
+    stmt = (
+        select(Game)
+        .where(
+            or_(
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
+            ),
+        )
+        .options(*_STAT_LOAD_OPTIONS)
+    )
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)
@@ -131,13 +143,17 @@ def get_player_analyzed_games_sync(
     time_control: str | None = None,
 ) -> list[Game]:
     """Sync twin of :func:`get_player_analyzed_games` for Celery tasks."""
-    stmt = select(Game).where(
-        or_(
-            func.lower(Game.white_player) == func.lower(player_name),
-            func.lower(Game.black_player) == func.lower(player_name),
-        ),
-        Game.is_analyzed.is_(True),
-    ).options(*_STAT_LOAD_OPTIONS)
+    stmt = (
+        select(Game)
+        .where(
+            or_(
+                func.lower(Game.white_player) == func.lower(player_name),
+                func.lower(Game.black_player) == func.lower(player_name),
+            ),
+            Game.is_analyzed.is_(True),
+        )
+        .options(*_STAT_LOAD_OPTIONS)
+    )
 
     if time_control is not None:
         stmt = stmt.where(Game.time_control == time_control)

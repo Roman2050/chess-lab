@@ -37,4 +37,3 @@ async def test_bulk_save_games_inserts_and_ignores_duplicates(async_session):
     stats2 = await bulk_save_games(async_session, games)
     assert stats2["saved_new"] == 0
     assert stats2["total_processed"] == 2
-

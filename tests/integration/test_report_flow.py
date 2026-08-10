@@ -147,9 +147,7 @@ def _analyzed_game(idx: int, *, player: str = PLAYER) -> Game:
 
 async def _seed_games(async_session, count: int, *, start: int = 0) -> None:
     """Insert ``count`` analyzed games for ``PLAYER`` and commit them."""
-    async_session.add_all(
-        [_analyzed_game(i) for i in range(start, start + count)]
-    )
+    async_session.add_all([_analyzed_game(i) for i in range(start, start + count)])
     await async_session.commit()
 
 
@@ -177,9 +175,7 @@ def _report_snapshot(sync_session_factory, *, language: str = "en") -> dict | No
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_full_report_flow(
-    async_session, client, eager_task, sync_session_factory
-):
+async def test_full_report_flow(async_session, client, eager_task, sync_session_factory):
     await _seed_games(async_session, THRESHOLD)
 
     resp = await client.post(f"/api/v1/report/{PLAYER}")
@@ -227,9 +223,7 @@ async def test_insufficient_games_no_generation(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_regenerates_after_threshold(
-    async_session, client, eager_task, sync_session_factory
-):
+async def test_regenerates_after_threshold(async_session, client, eager_task, sync_session_factory):
     await _seed_games(async_session, THRESHOLD)
     first = await client.post(f"/api/v1/report/{PLAYER}")
     assert first.status_code == 202
@@ -268,11 +262,7 @@ async def test_deleted_report_can_regenerate(
 
     # Deleting the row is the supported way to force a regeneration (no `force`).
     with sync_session_factory() as session:
-        session.execute(
-            PlayerReport.__table__.delete().where(
-                PlayerReport.player_name == PLAYER
-            )
-        )
+        session.execute(PlayerReport.__table__.delete().where(PlayerReport.player_name == PLAYER))
         session.commit()
     assert _report_snapshot(sync_session_factory) is None
 

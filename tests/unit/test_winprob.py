@@ -110,9 +110,7 @@ def test_move_wp_loss_skips_decided_positions() -> None:
 
     already_lost = _make_move(color="White", eval_before=-500, eval_after=-600)
     already_won = _make_move(color="White", eval_before=9_000, eval_after=10_000)
-    already_lost_as_black = _make_move(
-        color="Black", eval_before=500, eval_after=600
-    )
+    already_lost_as_black = _make_move(color="Black", eval_before=500, eval_after=600)
 
     assert move_wp_loss(already_lost) is None
     assert move_wp_loss(already_won) is None

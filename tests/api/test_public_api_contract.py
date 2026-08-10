@@ -1,5 +1,5 @@
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -15,7 +15,6 @@ from app.main import (
     OPENAPI_TAGS,
     REPOSITORY_URL,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -130,7 +129,7 @@ async def test_openapi_operations_are_documented_and_grouped(async_client) -> No
     }
 
     actual_tags = set()
-    for path, path_item in schema["paths"].items():
+    for _path, path_item in schema["paths"].items():
         for method in ("get", "post"):
             operation = path_item.get(method)
             if operation is None:
@@ -141,15 +140,13 @@ async def test_openapi_operations_are_documented_and_grouped(async_client) -> No
             assert operation["responses"]["200"]["description"]
 
     assert actual_tags == expected_tags
-    assert schema["paths"]["/api/v1/report/{username}"]["post"]["responses"][
-        "202"
-    ]["description"]
-    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"][
-        "responses"
-    ]["409"]["description"]
-    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"][
-        "responses"
-    ]["429"]["description"].startswith("Operation quota exhausted")
+    assert schema["paths"]["/api/v1/report/{username}"]["post"]["responses"]["202"]["description"]
+    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"]["responses"]["409"][
+        "description"
+    ]
+    assert schema["paths"]["/api/v1/games/lichess/{username}"]["post"]["responses"]["429"][
+        "description"
+    ].startswith("Operation quota exhausted")
 
 
 @pytest.mark.unit
@@ -177,9 +174,7 @@ async def test_openapi_response_schemas_have_safe_examples(async_client) -> None
     ):
         assert schemas[name]["examples"]
 
-    serialized_examples = str(
-        {name: schema.get("examples") for name, schema in schemas.items()}
-    )
+    serialized_examples = str({name: schema.get("examples") for name, schema in schemas.items()})
     assert settings.MVP_API_KEY.get_secret_value() not in serialized_examples
     assert "example.invalid" not in serialized_examples
 
@@ -211,16 +206,10 @@ def test_package_readme_and_openapi_metadata_are_aligned() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_cors_allows_only_configured_origin(async_client) -> None:
-    allowed = await async_client.get(
-        "/api/v1/demo", headers={"Origin": "https://frontend.example"}
-    )
-    unknown = await async_client.get(
-        "/api/v1/demo", headers={"Origin": "https://unknown.example"}
-    )
+    allowed = await async_client.get("/api/v1/demo", headers={"Origin": "https://frontend.example"})
+    unknown = await async_client.get("/api/v1/demo", headers={"Origin": "https://unknown.example"})
 
-    assert allowed.headers["access-control-allow-origin"] == (
-        "https://frontend.example"
-    )
+    assert allowed.headers["access-control-allow-origin"] == ("https://frontend.example")
     assert "access-control-allow-origin" not in unknown.headers
     assert settings.MVP_API_KEY.get_secret_value() not in str(allowed.headers)
     assert settings.MVP_API_KEY.get_secret_value() not in allowed.text
@@ -240,10 +229,6 @@ async def test_cors_preflight_allows_get_post_and_content_type(async_client) -> 
         )
 
         assert response.status_code == 200
-        assert response.headers["access-control-allow-origin"] == (
-            "https://frontend.example"
-        )
+        assert response.headers["access-control-allow-origin"] == ("https://frontend.example")
         assert method in response.headers["access-control-allow-methods"]
-        assert "x-api-key" not in response.headers[
-            "access-control-allow-headers"
-        ].lower()
+        assert "x-api-key" not in response.headers["access-control-allow-headers"].lower()

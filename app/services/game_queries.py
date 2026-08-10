@@ -1,7 +1,8 @@
-from sqlalchemy import select, func, or_, desc, asc
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
-from app.models.db import Game 
+
+from app.models.db import Game
 from app.schemas.games import SortOrder
 
 # Exactly the columns GameSummary exposes (plus is_analyzed, a cheap boolean the
@@ -27,11 +28,11 @@ async def get_filtered_games(
     offset: int,
     sort_order: SortOrder,
     player_name: str | None = None,
-    winner: str | None = None
+    winner: str | None = None,
 ) -> tuple[int, list[Game]]:
 
     stmt = select(Game)
-    
+
     if player_name:
         stmt = stmt.where(
             or_(

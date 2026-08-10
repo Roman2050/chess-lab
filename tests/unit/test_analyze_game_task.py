@@ -188,9 +188,7 @@ def test_missing_stockfish_path_does_not_claim(task_env, monkeypatch):
 
 @pytest.mark.unit
 def test_task_routes_configured(task_env):
-    assert task_env.module.analyze_game.name == (
-        "app.tasks.celery_app.analyze_game"
-    )
+    assert task_env.module.analyze_game.name == ("app.tasks.celery_app.analyze_game")
     assert task_env.module.generate_player_report.name == (
         "app.tasks.celery_app.generate_player_report"
     )
@@ -218,9 +216,10 @@ def test_engine_reused_between_tasks(task_env):
     task_env.engine.open_engine.assert_called_once_with()
     task_env.worker_engine.ping.assert_called_once_with()
     assert task_env.engine.analyse_game.call_count == 2
-    assert [
-        call.kwargs["engine"] for call in task_env.engine.analyse_game.call_args_list
-    ] == [task_env.worker_engine, task_env.worker_engine]
+    assert [call.kwargs["engine"] for call in task_env.engine.analyse_game.call_args_list] == [
+        task_env.worker_engine,
+        task_env.worker_engine,
+    ]
 
 
 @pytest.mark.unit

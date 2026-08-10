@@ -22,14 +22,11 @@ from app.services.lichess_errors import (
 )
 from app.services.lichess_gate import lichess_request_gate
 
-
 logger = logging.getLogger(__name__)
 
 LICHESS_GAMES_URL = "https://lichess.org/api/games/user"
 PGN_MEDIA_TYPES = frozenset({"application/x-chess-pgn", "text/plain"})
-PGN_TAG_PAIR_PATTERN = re.compile(
-    r'^\[[A-Za-z0-9_]+\s+"(?:[^"\\]|\\.)*"\]\s*$'
-)
+PGN_TAG_PAIR_PATTERN = re.compile(r'^\[[A-Za-z0-9_]+\s+"(?:[^"\\]|\\.)*"\]\s*$')
 RESPONSE_CHUNK_BYTES = 64 * 1024
 
 
@@ -47,9 +44,7 @@ def _request_headers() -> dict[str, str]:
         "Accept": "application/x-chess-pgn",
     }
     if settings.LICHESS_API_TOKEN is not None:
-        headers["Authorization"] = (
-            f"Bearer {settings.LICHESS_API_TOKEN.get_secret_value()}"
-        )
+        headers["Authorization"] = f"Bearer {settings.LICHESS_API_TOKEN.get_secret_value()}"
     return headers
 
 
@@ -193,9 +188,7 @@ async def fetch_games_from_lichess(
                         metadata.normalized_content_type = _media_type(response)
                         if response.status_code == 429:
                             upstream_rate_limited = True
-                            upstream_retry_after = response.headers.get(
-                                "Retry-After"
-                            )
+                            upstream_retry_after = response.headers.get("Retry-After")
                         else:
                             _raise_for_status(response.status_code)
                             metadata.declared_body_bytes = _validate_content_length(
@@ -242,11 +235,7 @@ async def fetch_games_from_lichess(
         failure_kind = "not_found"
         raise
     except LichessUnavailableError:
-        failure_kind = (
-            "upstream"
-            if metadata.upstream_http_status is not None
-            else "network"
-        )
+        failure_kind = "upstream" if metadata.upstream_http_status is not None else "network"
         raise
     except LichessProtocolError:
         failure_kind = "protocol"

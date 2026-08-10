@@ -7,9 +7,7 @@ class AnalysisQueueResponse(BaseModel):
     status: str
     game_id: int
 
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"status": "queued", "game_id": 42}]}
-    )
+    model_config = ConfigDict(json_schema_extra={"examples": [{"status": "queued", "game_id": 42}]})
 
 
 class BatchAnalysisResponse(BaseModel):
@@ -19,9 +17,7 @@ class BatchAnalysisResponse(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"status": "queued", "player": "DemoPlayer", "queued_count": 10}
-            ]
+            "examples": [{"status": "queued", "player": "DemoPlayer", "queued_count": 10}]
         }
     )
 

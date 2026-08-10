@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
+
+from alembic import command
 
 
 def _alembic_config() -> Config:
@@ -115,12 +116,9 @@ async def async_session(async_db_url, migrated_db):
 
         # Ensure clean state between tests; otherwise UNIQUE constraints may fail
         # across reruns or multiple tests.
-        await session.execute(
-            text("TRUNCATE TABLE games, player_reports RESTART IDENTITY CASCADE")
-        )
+        await session.execute(text("TRUNCATE TABLE games, player_reports RESTART IDENTITY CASCADE"))
         await session.commit()
         yield session
         await session.rollback()
 
     await engine.dispose()
-

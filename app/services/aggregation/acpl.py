@@ -92,9 +92,7 @@ def compute_player_acpl(games: list[Game], player_name: str) -> dict:
             "white": _mean_rounded(per_game_white_acpls),
             "black": _mean_rounded(per_game_black_acpls),
         },
-        "acpl_by_phase": {
-            phase: _mean_rounded(phase_losses[phase]) for phase in _PHASES
-        },
+        "acpl_by_phase": {phase: _mean_rounded(phase_losses[phase]) for phase in _PHASES},
     }
 
 

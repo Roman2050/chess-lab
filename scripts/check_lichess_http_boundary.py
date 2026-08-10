@@ -4,7 +4,6 @@ import ast
 import sys
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = REPOSITORY_ROOT / "app"
 ALLOWED_CLIENT = APP_ROOT / "services" / "lichess.py"
@@ -14,10 +13,7 @@ LICHESS_EXPORT_ROUTE_LITERAL = "/api/games/user"
 
 def _forbidden_literal(value: str) -> bool:
     normalized = value.casefold()
-    return (
-        LICHESS_URL_LITERAL in normalized
-        or LICHESS_EXPORT_ROUTE_LITERAL in normalized
-    )
+    return LICHESS_URL_LITERAL in normalized or LICHESS_EXPORT_ROUTE_LITERAL in normalized
 
 
 def _scan_file(source_path: Path) -> list[tuple[int, str]]:
@@ -53,8 +49,7 @@ def main() -> int:
         for violation in violations:
             print(f"- {violation}", file=sys.stderr)
         print(
-            "Outbound Lichess exports must go through "
-            "app/services/lichess.py.",
+            "Outbound Lichess exports must go through app/services/lichess.py.",
             file=sys.stderr,
         )
         return 1

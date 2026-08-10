@@ -154,11 +154,7 @@ class _FakeSyncDb:
 
 
 def _sql(stmt) -> str:
-    return str(
-        stmt.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
-    )
+    return str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
 
 async def _capture_async(fetch) -> str:
