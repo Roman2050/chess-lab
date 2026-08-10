@@ -147,19 +147,21 @@ Unit tests do not need external services. Integration tests use the dedicated
 `db_test` PostgreSQL service on port 5433.
 
 ```bash
-uv run python scripts/download_eco.py
-uv run pytest -m unit
 docker compose up -d db_test
-uv run pytest -m integration
-uv run pytest
-uv run python scripts/check_lichess_http_boundary.py
+uv sync --frozen --dev
+uv run --no-sync ruff check app tests scripts
+uv run --no-sync ruff format --check app tests scripts
+uv run --no-sync python scripts/download_eco.py
+uv run --no-sync python scripts/check_lichess_http_boundary.py
+uv run --no-sync pytest
 ```
 
-The GitHub Actions workflow runs the locked dependency set, the Lichess boundary
-guard as a separate visible step, and the complete automated test suite against a
-disposable PostgreSQL service. It builds the ignored local ECO dictionary from the
-official source before running tests. Automated tests mock the Lichess API and never
-spend its quota.
+For a focused local run, use `uv run --no-sync pytest -m unit` or
+`uv run --no-sync pytest -m integration`. The GitHub Actions workflow runs Ruff lint,
+Ruff format check, the Lichess boundary guard, and the complete automated test suite
+as separate visible gates against a disposable PostgreSQL service. It builds the
+ignored local ECO dictionary from the official source before running tests. Automated
+tests mock the Lichess API and never spend its quota.
 
 ## Operations and safety
 

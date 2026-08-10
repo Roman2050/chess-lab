@@ -42,6 +42,12 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --dev
 
+      - name: Lint Python source
+        run: uv run --no-sync ruff check app tests scripts
+
+      - name: Check Python formatting
+        run: uv run --no-sync ruff format --check app tests scripts
+
       - name: Build local ECO dictionary
         run: uv run --no-sync python scripts/download_eco.py
 
