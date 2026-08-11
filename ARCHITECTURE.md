@@ -264,6 +264,36 @@ recipe. The ECO generator downloads only `lichess-org/chess-openings` commit
 `4b8622759e7ae6f93f011cc6c83a3823401ab45e`, not a moving branch. Chess Lab makes
 no affiliation or endorsement claim for Lichess or Stockfish.
 
+**3.18 Single-VPS Production Boundary (Phase 8)**
+Local development keeps `docker-compose.yml` with host-published PostgreSQL/Redis
+ports and the dedicated `db_test` service. Production is a separate
+`compose.production.yaml` topology: Caddy, API, one-shot Alembic migration,
+dedicated `analysis` and `reports` workers, PostgreSQL, and Redis. API, workers,
+and migration use the same explicit GHCR image reference; production never uses
+`build:` or a source-code bind mount.
+
+Only Caddy publishes host ports (`80/tcp` and `443/tcp`). Caddy and API share a
+dedicated proxy network with fixed addresses; Uvicorn accepts forwarded headers
+only from Caddy's address. PostgreSQL, Redis, and Uvicorn use only Compose DNS and
+`expose`, never host-published ports. A separate internal network carries database
+and broker traffic, while an egress-only bridge lets the reports worker call the
+external LLM without joining the proxy boundary. The analysis worker has no
+external network.
+
+Caddy owns automatic HTTPS and persistent ACME state. It caps request bodies at
+24 MB so a 20 MiB PGN plus multipart framing is accepted, and uses bounded
+request/upstream timeouts longer than `LICHESS_TOTAL_TIMEOUT_SECONDS`. The default
+2 vCPU / 4 GB budget keeps analysis and reports concurrency at one,
+`STOCKFISH_THREADS=1`, and `STOCKFISH_HASH_MB=128`; container memory limits leave
+host reserve. Long-running workers receive warm Celery shutdown signals with
+bounded grace periods, but deployment still requires an explicit active-task and
+queue check because Compose timeout is not task recovery.
+
+Real production configuration lives in ignored `.env.production`. The committed
+`.env.production.example` is sanitized and documents required values; neither the
+Compose manifest nor Caddyfile contains credentials. Migrations are an explicit
+one-shot profile that must succeed before application smoke checks.
+
 ---
 
 ## 4. Project File Structure
@@ -342,7 +372,10 @@ chess-lab/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml             # Boundary guard + complete automated test suite
-├── docker-compose.yml         # PostgreSQL 16 + (planned) Redis
+├── Caddyfile                  # HTTPS edge, bounded uploads, reverse proxy to API
+├── compose.production.yaml    # Single-VPS production topology and network boundary
+├── docker-compose.yml         # Local PostgreSQL, test PostgreSQL, and Redis
+├── .env.production.example    # Sanitized production/Compose settings contract
 ├── pyproject.toml             # Dependencies, pytest config, build system
 ├── ARCHITECTURE.md            # This file — read before architectural changes
 ├── LICENSE                    # Chess Lab GPL-3.0-or-later terms and full GPLv3 text
