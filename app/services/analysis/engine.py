@@ -85,7 +85,11 @@ class StockfishEngine:
             try:
                 engine.quit()
             except Exception:
-                logger.exception("Could not close Stockfish after startup failure")
+                logger.error(
+                    "stockfish.startup_cleanup.failed",
+                    extra={"status": "failed", "failure_kind": "engine_shutdown"},
+                    exc_info=True,
+                )
             raise
         return engine
 

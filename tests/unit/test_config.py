@@ -82,6 +82,38 @@ def test_mvp_api_key_is_hidden_from_settings_repr() -> None:
 
 
 @pytest.mark.unit
+def test_runtime_logging_defaults_are_development_safe() -> None:
+    settings = Settings(
+        **BASE_SETTINGS,
+        MVP_API_KEY=VALID_MVP_API_KEY,
+        _env_file=None,
+    )
+
+    assert settings.APP_ENVIRONMENT == "development"
+    assert settings.LOG_LEVEL == "INFO"
+    assert settings.LOG_SERVICE == "chess-lab"
+
+
+@pytest.mark.unit
+def test_runtime_logging_rejects_unknown_environment_or_level() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            APP_ENVIRONMENT="staging",
+            _env_file=None,
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            **BASE_SETTINGS,
+            MVP_API_KEY=VALID_MVP_API_KEY,
+            LOG_LEVEL="TRACE",
+            _env_file=None,
+        )
+
+
+@pytest.mark.unit
 def test_lichess_user_agent_is_required(monkeypatch) -> None:
     monkeypatch.delenv("LICHESS_USER_AGENT", raising=False)
     values = {key: value for key, value in BASE_SETTINGS.items() if key != "LICHESS_USER_AGENT"}

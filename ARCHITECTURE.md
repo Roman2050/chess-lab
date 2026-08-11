@@ -294,6 +294,28 @@ Real production configuration lives in ignored `.env.production`. The committed
 Compose manifest nor Caddyfile contains credentials. Migrations are an explicit
 one-shot profile that must succeed before application smoke checks.
 
+**3.19 Structured Runtime Observability (Phase 8)**
+Production application logs are one JSON object per stdout line with stable base fields:
+timestamp, level, logger, event, service, environment, and package version. A whitelist
+serializes only bounded lifecycle metadata. API work uses an opaque `operation_id`;
+Celery work uses the broker `task_id` and, for analysis, `game_id`. The Phase 7B Lichess
+started/terminal event contract and its allowed metadata remain unchanged.
+
+Request bodies, headers, query strings, PGN/FEN bulk data, prompts, report text, keys,
+tokens, database credentials, upstream bodies, and original exception text are excluded.
+Permitted exception context consists of a bounded failure category, exception type, and
+at most 20 server-side stack frames without exception values. Successful `/health` and
+`/ready` probes are suppressed; a readiness 503 remains an application warning.
+
+Caddy emits structured stdout access records with method, path, status, duration,
+response size, and declared request size. It deletes all request headers and the original
+URI/query before encoding. Uvicorn access logging is disabled to avoid duplicate records.
+PostgreSQL statement logging remains off. Every long-lived production container uses the
+Docker `local` logging driver with 10 MB files and five-file retention. Provider metrics,
+Docker logs, external liveness plus a DB-backed demo check, and documented disk/memory/
+restart/backlog/stale-analysis alerts are the MVP observability boundary; a central log or
+metrics stack remains out of scope.
+
 ---
 
 ## 4. Project File Structure
@@ -302,6 +324,7 @@ one-shot profile that must succeed before application smoke checks.
 chess-lab/
 ├── app/
 │   ├── config.py              # Pydantic Settings: DB_*, redis_url, STOCKFISH_*
+│   ├── logging_config.py      # JSON/human formatters + bounded runtime context
 │   ├── database.py            # async + sync engines, session factories, Base
 │   ├── main.py                # FastAPI app instance, router registration
 │   ├── models/
@@ -368,7 +391,8 @@ chess-lab/
 │   └── check_lichess_http_boundary.py  # Static outbound-client ownership guard
 ├── docs/
 │   └── runbooks/
-│       └── lichess.md         # Lichess operations and safe recovery guide
+│       ├── lichess.md         # Lichess operations and safe recovery guide
+│       └── observability.md   # Logs, resource inspection, alerts, disk response
 ├── .github/
 │   └── workflows/
 │       └── ci.yml             # Boundary guard + complete automated test suite

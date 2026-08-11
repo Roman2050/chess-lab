@@ -1,5 +1,11 @@
 name: chess-lab-production
 
+x-bounded-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-app-service: &app-service
   image: ${CHESS_LAB_IMAGE:?Set CHESS_LAB_IMAGE to an immutable GHCR tag or digest}
   env_file:
@@ -12,6 +18,7 @@ x-app-service: &app-service
   security_opt:
     - no-new-privileges:true
   restart: unless-stopped
+  logging: *bounded-logging
   networks:
     - backend
 
@@ -27,6 +34,7 @@ services:
     environment:
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL to a monitored operator address}
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN to the public API hostname}
+      APP_VERSION: ${APP_VERSION:?Set APP_VERSION to the deployed image version}
     ports:
       - target: 80
         published: "80"
@@ -53,6 +61,7 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    logging: *bounded-logging
     stop_grace_period: 30s
     networks:
       proxy:
@@ -65,6 +74,8 @@ services:
 
   api:
     <<: *app-service
+    environment:
+      LOG_SERVICE: api
     command:
       - uvicorn
       - app.main:app
@@ -74,6 +85,7 @@ services:
       # The only trusted forwarded-header source is Caddy's fixed address on
       # the isolated proxy network. Uvicorn is not published on the host.
       - --forwarded-allow-ips=${CADDY_PROXY_IPV4:-172.30.0.2}
+      - --no-access-log
     expose:
       - "8000"
     depends_on: *app-dependencies
@@ -102,6 +114,8 @@ services:
 
   migrate:
     <<: *app-service
+    environment:
+      LOG_SERVICE: migrate
     command: ["alembic", "upgrade", "head"]
     profiles: ["migrate"]
     depends_on:
@@ -120,6 +134,8 @@ services:
 
   worker-analysis:
     <<: *app-service
+    environment:
+      LOG_SERVICE: worker-analysis
     command:
       - celery
       - -A
@@ -143,6 +159,8 @@ services:
 
   worker-reports:
     <<: *app-service
+    environment:
+      LOG_SERVICE: worker-reports
     command:
       - celery
       - -A
@@ -167,6 +185,7 @@ services:
 
   db:
     image: postgres:16.14-alpine3.23
+    command: ["postgres", "-c", "log_statement=none", "-c", "log_min_messages=warning"]
     environment:
       POSTGRES_DB: ${DB_NAME:?Set DB_NAME in .env.production}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.production}
@@ -182,6 +201,7 @@ services:
       start_period: 10s
       retries: 10
     restart: unless-stopped
+    logging: *bounded-logging
     stop_grace_period: 1m
     networks:
       - backend
@@ -205,6 +225,7 @@ services:
       start_period: 5s
       retries: 10
     restart: unless-stopped
+    logging: *bounded-logging
     stop_grace_period: 30s
     networks:
       - backend

@@ -246,6 +246,15 @@ token, a hard total timeout, a bounded response body, a Redis single-flight lock
 and a global `429` cooldown. `/health` is process liveness; `/ready` checks Redis
 availability and never calls Lichess.
 
+Production API and worker output is one structured JSON record per stdout line;
+development remains human-readable. Caddy emits filtered JSON access logs without
+headers or query strings, Uvicorn's duplicate access log is disabled, and every
+long-lived container uses Docker's `local` driver with five 10 MB files. Use the
+[runtime observability runbook](docs/runbooks/observability.md) to correlate API,
+Celery, and Lichess operations, inspect queues and resource usage, and configure the
+initial uptime, disk, memory, restart, backlog, and stale-analysis alerts. Do not run
+an unconditional `docker system prune`, because previous images are rollback targets.
+
 Use the [Lichess operator runbook](docs/runbooks/lichess.md) for safe credential
 changes, `409`/`429`/`503` diagnosis, cooldown inspection, lifecycle log fields, and
 the one-request smoke procedure. [.env.example](.env.example) is the local settings

@@ -1,12 +1,14 @@
 import logging
+from time import perf_counter
 
 from celery import Celery, Task
-from celery.signals import worker_process_shutdown
+from celery.signals import setup_logging, worker_process_shutdown
 from chess.engine import SimpleEngine
 from sqlalchemy import Update, func, update
 
 from app.config import REPORT_LLM_MAX_RETRIES, settings
 from app.database import get_sync_db_session
+from app.logging_config import configure_logging, log_context
 from app.models.db import ANALYSIS_STATUS_CLAIMABLE, Game
 from app.services.analysis.classifier import build_analysis_data
 from app.services.analysis.engine import StockfishEngine
@@ -33,6 +35,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=False,
     task_reject_on_worker_lost=False,
+    worker_hijack_root_logger=False,
 )
 
 # `analysis_error` is an unbounded text column, but a whole traceback inside a
@@ -41,6 +44,12 @@ _ANALYSIS_ERROR_MAX_LEN = 1000
 # Celery prefork children do not share module state. Each analysis child lazily
 # owns one UCI process, while a reports-only child never reaches this holder.
 _worker_engine: SimpleEngine | None = None
+
+
+@setup_logging.connect
+def _setup_worker_logging(**_: object) -> None:
+    """Keep Celery worker and task output on the centralized stdout handler."""
+    configure_logging(force=True)
 
 
 def _stockfish_wrapper() -> StockfishEngine:
@@ -66,7 +75,11 @@ def _close_worker_engine() -> None:
     try:
         engine.quit()
     except Exception:
-        logger.exception("Could not close worker-owned Stockfish process")
+        logger.error(
+            "stockfish.worker.close_failed",
+            extra={"status": "failed", "failure_kind": "engine_shutdown"},
+            exc_info=True,
+        )
 
 
 def get_worker_engine(
@@ -80,7 +93,8 @@ def get_worker_engine(
             _worker_engine.ping()
         except Exception:
             logger.warning(
-                "Worker-owned Stockfish process is dead; recreating it",
+                "stockfish.worker.restarting",
+                extra={"status": "restarting", "failure_kind": "engine_unavailable"},
                 exc_info=True,
             )
             _close_worker_engine()
@@ -149,9 +163,14 @@ def _mark_analysis_failed(game_id: int, exc: Exception) -> None:
                 .execution_options(synchronize_session=False)
             )
     except Exception:
-        logger.exception(
-            "analyze_game: could not record failure for game_id=%s (row stays 'running')",
-            game_id,
+        logger.error(
+            "analysis.task.failure_persist_failed",
+            extra={
+                "game_id": game_id,
+                "status": "failed",
+                "failure_kind": "database",
+            },
+            exc_info=True,
         )
 
 
@@ -175,8 +194,8 @@ def _save_analysis_result(game_id: int, analysis_data: dict) -> None:
         )
 
 
-@celery_app.task
-def analyze_game(game_id: int) -> None:
+@celery_app.task(bind=True)
+def analyze_game(self: Task, game_id: int) -> None:
     """Run Stockfish on a single Game row and persist the result.
 
     Three phases (per ARCHITECTURE.md §7), because Stockfish runs for minutes
@@ -189,45 +208,71 @@ def analyze_game(game_id: int) -> None:
     Phase A doubles as the idempotency guard: whoever loses the race gets no
     PGN back and returns without touching the engine.
     """
-    logger.info("analyze_game: starting for game_id=%s", game_id)
-
-    # Checked before the claim: a game marked `running` by a worker that then
-    # bails out has nothing to move it back — there is no lease reaper.
-    if not settings.STOCKFISH_PATH:
-        logger.error(
-            "analyze_game: STOCKFISH_PATH is not configured; aborting game_id=%s",
-            game_id,
-        )
-        return None
-
-    pgn_content = _claim_game_for_analysis(game_id)
-    if pgn_content is None:
+    started_at = perf_counter()
+    with log_context(task_id=self.request.id, game_id=game_id):
         logger.info(
-            "analyze_game: game_id=%s not claimable (missing, already analyzed, "
-            "or taken by another worker), skipping",
-            game_id,
+            "analysis.task.started",
+            extra={"game_id": game_id, "status": "started"},
         )
+
+        # Checked before the claim: a game marked `running` by a worker that then
+        # bails out has nothing to move it back — there is no lease reaper.
+        if not settings.STOCKFISH_PATH:
+            logger.error(
+                "analysis.task.failed",
+                extra={
+                    "game_id": game_id,
+                    "status": "failed",
+                    "failure_kind": "configuration",
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                },
+            )
+            return None
+
+        pgn_content = _claim_game_for_analysis(game_id)
+        if pgn_content is None:
+            logger.info(
+                "analysis.task.skipped",
+                extra={
+                    "game_id": game_id,
+                    "status": "not_claimable",
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                },
+            )
+            return None
+
+        try:
+            wrapper = _stockfish_wrapper()
+            engine = get_worker_engine(wrapper)
+            raw_moves = wrapper.analyse_game(pgn_content, engine=engine)
+            analysis_data = build_analysis_data(raw_moves)
+        except Exception as exc:
+            logger.error(
+                "analysis.task.failed",
+                extra={
+                    "game_id": game_id,
+                    "status": "failed",
+                    "failure_kind": "analysis",
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                },
+                exc_info=True,
+            )
+            _mark_analysis_failed(game_id, exc)
+            raise
+
+        _save_analysis_result(game_id, analysis_data)
+
+        logger.info(
+            "analysis.task.succeeded",
+            extra={
+                "game_id": game_id,
+                "status": "succeeded",
+                "moves_count": len(raw_moves),
+                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+            },
+        )
+
         return None
-
-    try:
-        wrapper = _stockfish_wrapper()
-        engine = get_worker_engine(wrapper)
-        raw_moves = wrapper.analyse_game(pgn_content, engine=engine)
-        analysis_data = build_analysis_data(raw_moves)
-    except Exception as exc:
-        logger.exception("analyze_game: analysis failed for game_id=%s", game_id)
-        _mark_analysis_failed(game_id, exc)
-        raise
-
-    _save_analysis_result(game_id, analysis_data)
-
-    logger.info(
-        "analyze_game: game_id=%s analyzed (%d moves)",
-        game_id,
-        len(raw_moves),
-    )
-
-    return None
 
 
 def _mark_report_failed(player_name: str, language: str) -> None:
@@ -240,10 +285,15 @@ def _mark_report_failed(player_name: str, language: str) -> None:
         with get_sync_db_session() as session:
             mark_failed_sync(session, player_name, language)
     except Exception:
-        logger.exception(
-            "generate_player_report: could not record failure for player=%s "
-            "(row stays 'generating' until its lease expires)",
-            player_name,
+        logger.error(
+            "report.task.failure_persist_failed",
+            extra={
+                "player_name_normalized": player_name.casefold(),
+                "language": language,
+                "status": "failed",
+                "failure_kind": "database",
+            },
+            exc_info=True,
         )
 
 
@@ -276,53 +326,81 @@ def generate_player_report(
     claim remains ``generating``. The final LLM failure and every non-LLM
     exception mark the row ``failed`` and propagate to Celery.
     """
-    logger.info("generate_player_report: starting for player=%s", player_name)
+    started_at = perf_counter()
+    with log_context(
+        task_id=self.request.id,
+        player_name_normalized=player_name.casefold(),
+        language=language,
+    ):
+        logger.info(
+            "report.task.started",
+            extra={"status": "started", "retry_number": self.request.retries},
+        )
 
-    try:
-        with get_sync_db_session() as session:
-            ctx = build_report_context(session, player_name, language)
+        try:
+            with get_sync_db_session() as session:
+                ctx = build_report_context(session, player_name, language)
 
-        # Nothing analyzed yet → no facts to narrate; don't poke the model.
-        if ctx.analyzed_games_count == 0:
+            # Nothing analyzed yet → no facts to narrate; don't poke the model.
+            if ctx.analyzed_games_count == 0:
+                logger.warning(
+                    "report.task.failed",
+                    extra={
+                        "status": "failed",
+                        "failure_kind": "insufficient_data",
+                        "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                    },
+                )
+                _mark_report_failed(player_name, language)
+                return None
+
+            system, user = build_messages(ctx)
+            text = get_llm_provider().generate(system, user)
+
+            with get_sync_db_session() as session:
+                save_report_result_sync(
+                    session,
+                    player_name,
+                    language,
+                    report_text=text,
+                    analyzed_games_count=ctx.analyzed_games_count,
+                    last_game_played_at=ctx.last_game_played_at,
+                )
+        except LLMError:
+            final_attempt = self.request.retries >= REPORT_LLM_MAX_RETRIES
             logger.warning(
-                "generate_player_report: no analyzed games for player=%s, marking failed",
-                player_name,
+                "report.task.failed" if final_attempt else "report.task.retrying",
+                extra={
+                    "status": "failed" if final_attempt else "retrying",
+                    "failure_kind": "llm",
+                    "retry_number": self.request.retries,
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                },
+                exc_info=True,
+            )
+            if final_attempt:
+                _mark_report_failed(player_name, language)
+            raise
+        except Exception:
+            logger.error(
+                "report.task.failed",
+                extra={
+                    "status": "failed",
+                    "failure_kind": "unexpected",
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                },
+                exc_info=True,
             )
             _mark_report_failed(player_name, language)
-            return None
+            raise
 
-        system, user = build_messages(ctx)
-        text = get_llm_provider().generate(system, user)
-
-        with get_sync_db_session() as session:
-            save_report_result_sync(
-                session,
-                player_name,
-                language,
-                report_text=text,
-                analyzed_games_count=ctx.analyzed_games_count,
-                last_game_played_at=ctx.last_game_played_at,
-            )
-    except LLMError:
-        logger.exception(
-            "generate_player_report: LLM attempt failed for %s",
-            player_name,
+        logger.info(
+            "report.task.succeeded",
+            extra={
+                "status": "succeeded",
+                "analyzed_games_count": ctx.analyzed_games_count,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+            },
         )
-        if self.request.retries >= REPORT_LLM_MAX_RETRIES:
-            _mark_report_failed(player_name, language)
-        raise
-    except Exception:
-        logger.exception(
-            "generate_player_report: report generation failed for %s",
-            player_name,
-        )
-        _mark_report_failed(player_name, language)
-        raise
 
-    logger.info(
-        "generate_player_report: finished for player=%s (%d analyzed games)",
-        player_name,
-        ctx.analyzed_games_count,
-    )
-
-    return None
+        return None

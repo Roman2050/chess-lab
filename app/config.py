@@ -1,4 +1,4 @@
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_NAME: str
     redis_url: str | None = None
+
+    # Runtime identity and centralized logging. Production uses one JSON object
+    # per stdout line; development and tests retain a compact human format.
+    APP_ENVIRONMENT: Literal["development", "test", "production"] = "development"
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    LOG_SERVICE: str = Field(default="chess-lab", min_length=1, max_length=64)
 
     # Public discovery and browser access. CORS origins are exact origins
     # (scheme + host + optional port), never URL prefixes or wildcard patterns.

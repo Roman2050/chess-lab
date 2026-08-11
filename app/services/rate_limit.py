@@ -113,26 +113,36 @@ async def consume_operation_quota(
         )
     except RateLimitUnavailableError:
         logger.error(
-            "rate_limit: operation=%s status=unavailable key=%s",
-            operation.value,
-            fingerprint,
+            "rate_limit.unavailable",
+            extra={
+                "operation": operation.value,
+                "status": "unavailable",
+                "failure_kind": "configuration",
+            },
         )
         raise
     except Exception as exc:
         logger.error(
-            "rate_limit: operation=%s status=unavailable key=%s",
-            operation.value,
-            fingerprint,
+            "rate_limit.unavailable",
+            extra={
+                "operation": operation.value,
+                "status": "unavailable",
+                "failure_kind": "redis",
+            },
         )
         raise RateLimitUnavailableError("Redis rate-limit backend is unavailable") from exc
 
     allowed = count <= limit
     logger.log(
         logging.INFO if allowed else logging.WARNING,
-        "rate_limit: operation=%s status=%s key=%s",
-        operation.value,
-        "allowed" if allowed else "rejected",
-        fingerprint,
+        "rate_limit.consumed" if allowed else "rate_limit.rejected",
+        extra={
+            "operation": operation.value,
+            "status": "allowed" if allowed else "rejected",
+            "limit": limit,
+            "remaining": max(limit - count, 0),
+            "retry_after": retry_after,
+        },
     )
     return RateLimitResult(
         allowed=allowed,
