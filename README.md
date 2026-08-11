@@ -189,6 +189,56 @@ environment file; no secrets are included in the image. The generated ECO dictio
 and Stockfish 18 are already present, and the complete project license and third-party
 notices are stored in `/usr/share/licenses/chess-lab/`.
 
+## Production Compose and HTTPS boundary
+
+The local [docker-compose.yml](docker-compose.yml) intentionally keeps convenient
+host ports and the `db_test` service. The production
+[compose.production.yaml](compose.production.yaml) is a separate single-VPS topology:
+Caddy is the only service publishing ports (`80/tcp` and `443/tcp`), while Uvicorn,
+PostgreSQL, and Redis are reachable only through Docker networks.
+
+Copy [.env.production.example](.env.production.example) to `.env.production`, replace
+every example-only value, and restrict the file to the deployment operator. Use an
+immutable `CHESS_LAB_IMAGE` tag or digest. The real file is ignored by Git and must
+never be pasted into an issue, CI log, or `docker compose config` output shared with
+others.
+
+Validate the rendered topology and Caddy syntax before pulling or starting services:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml --profile migrate config --quiet
+docker compose --env-file .env.production -f compose.production.yaml run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+The first controlled start keeps migration separate from long-running services:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml pull
+docker compose --env-file .env.production -f compose.production.yaml up -d db redis
+docker compose --env-file .env.production -f compose.production.yaml --profile migrate run --rm migrate
+docker compose --env-file .env.production -f compose.production.yaml up -d api worker-analysis worker-reports caddy
+docker compose --env-file .env.production -f compose.production.yaml ps
+```
+
+Caddy terminates TLS, redirects HTTP to HTTPS, permits at most 24 MB per request
+(enough for a 20 MiB PGN plus multipart framing), and proxies only to the private API
+service. Uvicorn trusts forwarded headers only from Caddy's fixed proxy-network
+address. Caddy certificate state and PostgreSQL data are persistent volumes; no
+host-installed Python, uv, or Stockfish is used.
+
+The 2 vCPU / 4 GB defaults use one process for each worker,
+`STOCKFISH_THREADS=1`, and `STOCKFISH_HASH_MB=128`. Keep these invariants when tuning:
+
+```text
+analysis concurrency × STOCKFISH_THREADS <= available CPU cores
+analysis concurrency × STOCKFISH_HASH_MB <= analysis-worker memory budget
+```
+
+Before updating or stopping workers, inspect active/reserved tasks and queue depth,
+then request a warm shutdown. The 30-minute analysis and 15-minute report grace
+periods protect ordinary tasks from an immediate cold kill; they are not a stale-task
+recovery mechanism.
+
 ## Operations and safety
 
 Lichess imports use a stable application `User-Agent`, an optional server-side
@@ -198,8 +248,9 @@ availability and never calls Lichess.
 
 Use the [Lichess operator runbook](docs/runbooks/lichess.md) for safe credential
 changes, `409`/`429`/`503` diagnosis, cooldown inspection, lifecycle log fields, and
-the one-request smoke procedure. [.env.example](.env.example) is the canonical list
-of settings and safe placeholders.
+the one-request smoke procedure. [.env.example](.env.example) is the local settings
+template; [.env.production.example](.env.production.example) is the sanitized
+single-VPS contract.
 
 ## Known MVP limitations and roadmap
 
@@ -212,8 +263,8 @@ of settings and safe placeholders.
 - The MVP uses one operator API key; multi-user authentication and per-user OAuth
   are outside the current scope. Browser clients are intentionally unable to send
   this operator key through CORS.
-- Production packaging, hosted demo metadata, monitoring integration, and deployment
-  smoke automation remain roadmap work.
+- Hosted demo data, external monitoring integration, and automated deployment remain
+  roadmap work; the first production deploy and rollback are intentionally manual.
 
 ## License
 
