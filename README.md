@@ -1,5 +1,7 @@
 # Chess Lab
 
+[![CI](https://github.com/Roman2050/chess-lab/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Roman2050/chess-lab/actions/workflows/ci.yml)
+
 Bulk chess game analysis and opponent scouting with Stockfish-backed insights.
 
 Chess Lab imports a player's game history, runs bounded Stockfish analysis,
@@ -149,9 +151,9 @@ Unit tests do not need external services. Integration tests use the dedicated
 ```bash
 docker compose up -d db_test
 uv sync --frozen --dev
+uv run --no-sync python scripts/download_eco.py
 uv run --no-sync ruff check app tests scripts
 uv run --no-sync ruff format --check app tests scripts
-uv run --no-sync python scripts/download_eco.py
 uv run --no-sync python scripts/check_lichess_http_boundary.py
 uv run --no-sync pytest
 ```
@@ -160,8 +162,10 @@ For a focused local run, use `uv run --no-sync pytest -m unit` or
 `uv run --no-sync pytest -m integration`. The GitHub Actions workflow runs Ruff lint,
 Ruff format check, the Lichess boundary guard, and the complete automated test suite
 as separate visible gates against a disposable PostgreSQL service. It builds the
-ignored local ECO dictionary from the official source before running tests. Automated
-tests mock the Lichess API and never spend its quota.
+ignored local ECO dictionary from the official source before linting and tests, then
+builds the release Dockerfile and smoke-tests application imports, OCI labels, and the
+container `/health` endpoint. Automated tests mock the Lichess API and never spend its
+quota; CI does not call an external LLM provider.
 
 ## Production image
 
@@ -188,6 +192,35 @@ Runtime configuration is supplied through environment variables or an external
 environment file; no secrets are included in the image. The generated ECO dictionary
 and Stockfish 18 are already present, and the complete project license and third-party
 notices are stored in `/usr/share/licenses/chess-lab/`.
+
+### GHCR releases
+
+A published, non-prerelease GitHub Release with an exact `vX.Y.Z` tag triggers the
+same complete verification job before publication. The tag without its leading `v`
+must equal the version in `pyproject.toml`; a mismatch fails before registry login.
+The release job uses GitHub's short-lived `GITHUB_TOKEN`, not a stored registry or VPS
+credential, and publishes two Linux x86-64 tags:
+
+```text
+ghcr.io/roman2050/chess-lab:vX.Y.Z
+ghcr.io/roman2050/chess-lab:<full-40-character-source-commit>
+```
+
+No `latest` tag is produced. The image carries OCI source, revision, version,
+description, and `GPL-3.0-or-later` labels. For a public repository, the workflow also
+attaches signed build provenance to its digest; GitHub Free, Pro, and Team do not provide
+artifact attestations for private repositories. Treat release tags as immutable: never
+delete and recreate a published version for different source. Production should use
+the explicit version tag shown above or, after verification, the registry digest.
+Publishing an image does not connect to or deploy the VPS.
+
+After publishing, pull and inspect the release without checking out the repository:
+
+```bash
+docker pull ghcr.io/roman2050/chess-lab:v0.1.0
+docker image inspect ghcr.io/roman2050/chess-lab:v0.1.0 \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
 
 ## Production Compose and HTTPS boundary
 
