@@ -108,9 +108,15 @@ async def request_report(
                 # it, so hand the claim back instead of blocking the player
                 # until the lease expires.
                 await release_generating(db, username, language)
-                logger.exception(
-                    "request_report: could not enqueue generation for player=%s",
-                    username,
+                logger.error(
+                    "report.enqueue.failed",
+                    extra={
+                        "player_name_normalized": username.casefold(),
+                        "language": language,
+                        "status": "failed",
+                        "failure_kind": "queue",
+                    },
+                    exc_info=True,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

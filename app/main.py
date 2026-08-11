@@ -1,10 +1,14 @@
+import logging
 from importlib.metadata import version
+from time import perf_counter
 from urllib.parse import quote
+from uuid import uuid4
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import API_V1_PREFIX, settings
+from app.logging_config import bind_log_context, reset_log_context
 from app.routers import analysis, games, report
 from app.schemas.public import (
     DemoDiscovery,
@@ -15,6 +19,8 @@ from app.schemas.public import (
     ServiceLinks,
 )
 from app.services.rate_limit import is_rate_limit_backend_ready
+
+logger = logging.getLogger(__name__)
 
 APP_NAME = "Chess Lab API"
 APP_SUMMARY = "Bulk chess game analysis and opponent scouting with Stockfish-backed insights."
@@ -93,6 +99,59 @@ app = FastAPI(
     },
     openapi_tags=OPENAPI_TAGS,
 )
+
+
+@app.middleware("http")
+async def log_request_lifecycle(request: Request, call_next):
+    """Emit one bounded API lifecycle event without bodies, headers, or query data."""
+    operation_id = uuid4().hex
+    started_at = perf_counter()
+    token = bind_log_context(operation_id=operation_id)
+    path = request.url.path
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.error(
+            "api.request.failed",
+            extra={
+                "method": request.method,
+                "path": path,
+                "http_status": 500,
+                "status": "failed",
+                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                "failure_kind": "unexpected",
+            },
+            exc_info=True,
+        )
+        raise
+    else:
+        # Successful liveness/readiness polling is deliberately silent. A
+        # readiness failure remains visible as an operational warning.
+        if path not in {"/health", "/ready"} or response.status_code >= 500:
+            lifecycle_status = (
+                "succeeded"
+                if response.status_code < 400
+                else "client_error"
+                if response.status_code < 500
+                else "server_error"
+            )
+            logger.log(
+                logging.WARNING if response.status_code >= 500 else logging.INFO,
+                "api.request.completed",
+                extra={
+                    "method": request.method,
+                    "path": path,
+                    "http_status": response.status_code,
+                    "status": lifecycle_status,
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+                    "failure_kind": "server" if response.status_code >= 500 else None,
+                },
+            )
+        return response
+    finally:
+        reset_log_context(token)
+
 
 app.add_middleware(
     CORSMiddleware,
