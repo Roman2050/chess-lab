@@ -38,11 +38,14 @@ packages = ["app"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/.env.example",
+    "/.env.production.example",
     "/.github",
     "/alembic",
     "/alembic.ini",
     "/app",
     "/ARCHITECTURE.md",
+    "/Caddyfile",
+    "/compose.production.yaml",
     "/docker-compose.yml",
     "/docs",
     "/LICENSE",
