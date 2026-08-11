@@ -195,11 +195,24 @@ notices are stored in `/usr/share/licenses/chess-lab/`.
 
 ### GHCR releases
 
+Before the first VPS deployment, the CI workflow can be dispatched manually from
+`main`. The manual bootstrap path runs the complete verification job and publishes
+exactly one Linux x86-64 tag for that `main` commit:
+
+```text
+ghcr.io/roman2050/chess-lab:<full-40-character-source-commit>
+```
+
+It publishes no semantic-version or `latest` tag and does not create a GitHub Release.
+Use the resulting registry digest for the Chat 10 deployment and rollback record. A
+manual dispatch from any branch other than `main` fails before registry login.
+
 A published, non-prerelease GitHub Release with an exact `vX.Y.Z` tag triggers the
 same complete verification job before publication. The tag without its leading `v`
-must equal the version in `pyproject.toml`; a mismatch fails before registry login.
-The release job uses GitHub's short-lived `GITHUB_TOKEN`, not a stored registry or VPS
-credential, and publishes two Linux x86-64 tags:
+must equal the version in `pyproject.toml`, and the tagged commit must be contained in
+`main`; a mismatch fails before registry login. The release job uses GitHub's short-lived
+`GITHUB_TOKEN`, not a stored registry or VPS credential, and publishes two Linux x86-64
+tags:
 
 ```text
 ghcr.io/roman2050/chess-lab:vX.Y.Z
