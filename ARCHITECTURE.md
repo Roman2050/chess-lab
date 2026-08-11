@@ -336,12 +336,12 @@ chess-lab/
 │   │   ├── stats.py           # PlayerStats, AcplStats, PhaseStats, OpeningStat,
 │   │   │                      #   MoveAccuracyStat, WpLossStats [Phase 6], ...
 │   │   ├── analysis.py        # BatchAnalysisResponse, AnalysisProgress
-│   │   └── report.py          # [PLANNED Phase 5] ReportContext, ReportInsights,
+│   │   └── report.py          # ReportContext, ReportInsights,
 │   │                          #           Report{Request,Status}Response, ReportResponse
 │   ├── routers/
 │   │   ├── games.py           # Games + per-player stats endpoints (see Section 6)
 │   │   ├── analysis.py        # Batch analysis enqueue + progress
-│   │   └── report.py          # [PLANNED Phase 5] LLM report POST/GET/status
+│   │   └── report.py          # LLM report POST/GET/status
 │   ├── services/
 │   │   ├── rate_limit.py      # Atomic Redis fixed-window quotas for expensive POST
 │   │   ├── lichess.py         # identified, timeout/size-bounded Lichess PGN client
@@ -365,16 +365,16 @@ chess-lab/
 │   │   │   ├── openings.py    # compute_opening_stats() win-rate + opening ACPL/WP
 │   │   │   └── errors.py      # compute_error_patterns() by piece / move number
 │   │   ├── eco.py             # [PLANNED] ECO opening dictionary lookup
-│   │   ├── llm/               # [PLANNED Phase 5] LLM provider abstraction
+│   │   ├── llm/               # LLM provider abstraction
 │   │   │   ├── base.py        #   LLMProvider Protocol + LLMError
 │   │   │   ├── openai_compat.py  # httpx client for OpenAI-compatible APIs (Ollama, …)
 │   │   │   └── factory.py     #   get_llm_provider() from settings
-│   │   ├── report_context.py  # [PLANNED Phase 5] build ReportContext + derive_insights
-│   │   ├── report_prompt.py   # [PLANNED Phase 5] system prompt + context digest
-│   │   ├── report_repository.py  # [PLANNED Phase 5] PlayerReport CRUD (async read + claim / sync write)
-│   │   └── report.py          # [PLANNED Phase 5] decide_report_action() + ReportAction
+│   │   ├── report_context.py  # build ReportContext + derive_insights
+│   │   ├── report_prompt.py   # system prompt + context digest
+│   │   ├── report_repository.py  # PlayerReport CRUD (async read + claim / sync write)
+│   │   └── report.py          # decide_report_action() + ReportAction
 │   ├── tasks/
-│   │   └── celery_app.py      # Celery app + analyze_game; [PLANNED Phase 5]
+│   │   └── celery_app.py      # Celery app + analyze_game;
 │   │                          #           generate_player_report task
 │   └── utils/
 │       └── parser.py          # parse_pgn_text() → list[dict]
@@ -460,7 +460,7 @@ There is no lease reaper: a worker killed mid-analysis leaves the row `running`,
 `analysis_started_at` makes such stale jobs visible. Returning them to the queue
 automatically is a separate iteration (it needs a safe lease interval).
 
-### 5.2 `PlayerReport` — LLM reports [PLANNED Phase 5]
+### 5.2 `PlayerReport` — LLM reports
 
 ```python
 class PlayerReport(Base):
@@ -725,30 +725,30 @@ is already used).
 
 ---
 
-## 8. Implementation Roadmap
+## 8. Implementation Roadmap and Status
 
-**Phase 1 — Analysis Pipeline (Celery + Stockfish)**
+**Phase 1 — Analysis Pipeline (Celery + Stockfish) — Completed**
 Configure Celery workers to pick up claimable games (`analysis_status` in
 `pending|failed`; before Phase 7: `is_analyzed=False`), run
 Stockfish with `MultiPV=2`, calculate `cp_loss`, assign `classification`, write
 `analysis_data` to DB, set `is_analyzed=True`.
 
-**Phase 2 — Opening Enrichment (ECO)**
+**Phase 2 — Opening Enrichment (ECO) — Completed**
 Integrate ECO opening dictionary lookup at PGN parse time when the `Opening` PGN tag
 is missing. Match via FEN prefix or move sequence.
 
-**Phase 3 — Tactical Detector (Heuristics)**
+**Phase 3 — Tactical Detector (Heuristics) — Completed**
 Build `python-chess`-based algorithms to explain why the engine evaluation dropped:
 forks, pins, hanging pieces, missed threats. Populate `tactical_tags`.
 
-**Phase 4 — Data Aggregation**
+**Phase 4 — Data Aggregation — Completed**
 Write functions/SQL queries to collect per-player stats:
 - Weighted average ACPL (by move count)
 - Accuracy by game phase (opening / middlegame / endgame)
 - Favorite openings and win rates
 - Most frequent error pieces and move numbers
 
-**Phase 5 — LLM Integration**
+**Phase 5 — LLM Integration — Completed**
 Assemble a `ReportContext` from the Phase 4 aggregations plus deterministic
 `insights`, render it into a language-neutral fact digest, and have an LLM phrase it
 as a human-readable report (characterization + recommendations). The model is a
@@ -759,7 +759,7 @@ the result is cached in `PlayerReport` and exposed via `POST` / `GET` /
 `GET .../status`. Reports are regenerated only when the player's analyzed-game count
 has grown by `REPORT_REFRESH_THRESHOLD` since the last snapshot (Section 7.1).
 
-**Phase 6 — Win-Probability Report Metric**
+**Phase 6 — Win-Probability Report Metric — Completed**
 The report uses **win-probability loss** instead of raw ACPL (Section 3.6): a
 logistic map of the stored per-move evals into "winning chances lost per move",
 restricted to calibrated live positions and applied to overall / color / phase /
@@ -769,6 +769,32 @@ artifact) and yields a metric both humans and the LLM read intuitively. The publ
 `/stats` endpoints stay on ACPL; `/stats/.../moves` gains `avg_wp_loss` alongside
 `avg_cp_loss`. It is a **read-side derived metric** over existing `eval_before` /
 `eval_after` — no DB change, no migration, no re-analysis.
+
+**Phase 7 — Optimization and Deployment Hardening — Completed**
+Optimize Stockfish analysis from `2N` to `N+1` position evaluations, introduce
+persistent analysis lifecycle state and atomic task claims, and keep long-running
+Stockfish and LLM work outside database sessions. Harden report generation, PGN
+identity and ingestion, case-insensitive player lookup, read-side column loading,
+MultiPV only-move detection, and Celery runtime isolation and delivery semantics.
+
+**Phase 7A — MVP Access Control and Operation Budgets — Completed**
+Keep the portfolio read-side public while protecting every mutating or expensive
+`POST` operation with a single operator API key. Bound upload size and game count,
+analysis fan-out, and report languages, and enforce fail-closed Redis quotas shared
+across API processes.
+
+**Phase 7B — Lichess Compatibility and Distributed Single-Flight — Completed**
+Add an explicit Lichess application identity, bounded and validated PGN responses,
+safe upstream error mapping, and structured lifecycle observability. Coordinate all
+API processes through a deployment-wide Redis lock and cooldown so only one Lichess
+export is active and upstream rate limits are respected.
+
+**Phase 8 — Production Deployment and Portfolio Release — In Progress**
+Package the completed backend as a reproducible OCI image and publish immutable,
+traceable releases through GHCR. Deploy the API, isolated Celery workers, PostgreSQL,
+and Redis behind Caddy on a single VPS; document deployment, backup, rollback, and
+recovery; and expose a safe read-only demo with bounded structured observability and
+portfolio documentation.
 
 ---
 
