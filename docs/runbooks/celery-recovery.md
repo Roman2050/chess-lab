@@ -166,16 +166,22 @@ run `COMMIT;`, then `\q`. Never remove the timestamp condition, use a player-wid
 ## Re-enqueue through the protected API
 
 Do not publish a Celery message manually. The existing exact-game API shares the normal
-quota and audit boundary. Read the API key interactively so its value is absent from
-shell history:
+quota and audit boundary. Read the API key interactively and pass it through a temporary
+`0600` header file so its value is absent from shell history and process arguments:
 
 ```bash
+umask 077
+API_HEADER_FILE="$(mktemp)"
+trap 'rm -f -- "$API_HEADER_FILE"' EXIT
 read -rsp 'Chess Lab operator API key: ' CHESS_LAB_API_KEY
 echo
-curl --fail-with-body --request POST \
-  --header "X-API-Key: ${CHESS_LAB_API_KEY}" \
-  https://<api.example.com>/api/v1/games/<game-id>/analyze
+printf 'X-API-Key: %s\n' "$CHESS_LAB_API_KEY" >"$API_HEADER_FILE"
 unset CHESS_LAB_API_KEY
+curl --fail-with-body --request POST \
+  --header "@${API_HEADER_FILE}" \
+  https://<api.example.com>/api/v1/games/<game-id>/analyze
+rm -f -- "$API_HEADER_FILE"
+trap - EXIT
 ```
 
 Expect a queued response. Then verify the `analysis` queue/active worker, new
@@ -213,12 +219,18 @@ Then:
    operator endpoint; its atomic claim decides whether regeneration is allowed:
 
 ```bash
+umask 077
+API_HEADER_FILE="$(mktemp)"
+trap 'rm -f -- "$API_HEADER_FILE"' EXIT
 read -rsp 'Chess Lab operator API key: ' CHESS_LAB_API_KEY
 echo
-curl --fail-with-body --request POST \
-  --header "X-API-Key: ${CHESS_LAB_API_KEY}" \
-  'https://<api.example.com>/api/v1/report/<url-encoded-player>?language=<language>'
+printf 'X-API-Key: %s\n' "$CHESS_LAB_API_KEY" >"$API_HEADER_FILE"
 unset CHESS_LAB_API_KEY
+curl --fail-with-body --request POST \
+  --header "@${API_HEADER_FILE}" \
+  'https://<api.example.com>/api/v1/report/<url-encoded-player>?language=<language>'
+rm -f -- "$API_HEADER_FILE"
+trap - EXIT
 ```
 
 Poll the public status endpoint and inspect terminal logs:

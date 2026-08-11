@@ -177,4 +177,3 @@ supported boundary.
 
 - [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)
 - [Caddy data-directory conventions](https://caddyserver.com/docs/conventions#data-directory)
-

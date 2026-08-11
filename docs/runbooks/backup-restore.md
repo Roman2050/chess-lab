@@ -263,7 +263,10 @@ Record it before continuing:
 
 ```bash
 RESTORE_DB=chess_lab_restore_yyyymmdd
-case "$RESTORE_DB" in chess_lab_restore_[a-z0-9_]*) ;; *) echo 'Unsafe restore DB name' >&2; exit 1;; esac
+if [[ ! "$RESTORE_DB" =~ ^chess_lab_restore_[a-z0-9_]+$ ]]; then
+  echo 'Unsafe restore DB name' >&2
+  exit 1
+fi
 ```
 
 Validate the archive, create the disposable DB from `template0`, and restore with errors
@@ -306,7 +309,10 @@ Dropping the disposable database is destructive. Do it only after the restore ev
 has been recorded and the exact name has passed the guard again:
 
 ```bash
-case "$RESTORE_DB" in chess_lab_restore_[a-z0-9_]*) ;; *) echo 'Refusing drop' >&2; exit 1;; esac
+if [[ ! "$RESTORE_DB" =~ ^chess_lab_restore_[a-z0-9_]+$ ]]; then
+  echo 'Refusing drop' >&2
+  exit 1
+fi
 sudo docker compose --env-file .env.production -f compose.production.yaml exec -T db sh -c \
   'dropdb --username "$POSTGRES_USER" "$1"' sh "$RESTORE_DB"
 sudo rm -f -- /var/tmp/chess-lab-restore/<exact-backup.dump> \
