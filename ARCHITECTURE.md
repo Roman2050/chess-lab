@@ -391,6 +391,11 @@ chess-lab/
 │   └── check_lichess_http_boundary.py  # Static outbound-client ownership guard
 ├── docs/
 │   └── runbooks/
+│       ├── deployment.md      # Ubuntu VPS bootstrap, deploy, update, rollback
+│       ├── dns-tls.md         # DNS, Caddy ACME, direct TLS and renewal checks
+│       ├── backup-restore.md  # Encrypted S3-compatible backup and restore drills
+│       ├── celery-recovery.md # Exact stale-task audit, reset and API re-enqueue
+│       ├── incident.md        # Runtime incidents, rotation, compromised-host recovery
 │       ├── lichess.md         # Lichess operations and safe recovery guide
 │       └── observability.md   # Logs, resource inspection, alerts, disk response
 ├── .github/

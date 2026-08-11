@@ -272,6 +272,15 @@ then request a warm shutdown. The 30-minute analysis and 15-minute report grace
 periods protect ordinary tasks from an immediate cold kill; they are not a stale-task
 recovery mechanism.
 
+The production procedures are written for a first deployment on Ubuntu Server 24.04
+LTS. Follow them in order; do not improvise destructive recovery steps:
+
+- [deployment, update, and exact rollback](docs/runbooks/deployment.md);
+- [DNS, direct TLS, and certificate renewal](docs/runbooks/dns-tls.md);
+- [encrypted off-server backup and test restore](docs/runbooks/backup-restore.md);
+- [Celery stale-task diagnosis and controlled recovery](docs/runbooks/celery-recovery.md);
+- [production incident response and secret rotation](docs/runbooks/incident.md).
+
 ## Operations and safety
 
 Lichess imports use a stable application `User-Agent`, an optional server-side
