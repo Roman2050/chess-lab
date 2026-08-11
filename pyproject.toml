@@ -1,18 +1,111 @@
 [project]
 name = "chess-lab"
 version = "0.1.0"
-description = "Add your description here"
+description = "Bulk chess game analysis and opponent scouting with Stockfish-backed insights."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
+    "celery>=5.4.0",
     "fastapi>=0.136.0",
     "httpx>=0.28.1",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.14.0",
     "python-chess>=1.999",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.26",
+    "redis>=5.0.0",
     "sqlalchemy>=2.0.49",
     "uvicorn>=0.45.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Roman2050/chess-lab"
+Repository = "https://github.com/Roman2050/chess-lab"
+Documentation = "https://github.com/Roman2050/chess-lab#readme"
+Architecture = "https://github.com/Roman2050/chess-lab/blob/main/ARCHITECTURE.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/.env.example",
+    "/.env.production.example",
+    "/.github",
+    "/alembic",
+    "/alembic.ini",
+    "/app",
+    "/ARCHITECTURE.md",
+    "/Caddyfile",
+    "/compose.production.yaml",
+    "/docker-compose.yml",
+    "/docs",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/README.md",
+    "/scripts",
+    "/tests",
+    "/THIRD_PARTY_NOTICES.md",
+    "/uv.lock",
+]
+
+[dependency-groups]
+dev = [
+    "factory-boy>=3.3.3",
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "respx>=0.23.1",
+    "ruff>=0.16.2",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    "alembic/versions",
+    "data",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+ignore = [
+    # StrEnum changes str()/format behavior; keep the existing API enum contract.
+    "UP042",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-ra",
+    "--strict-markers",
+]
+markers = [
+    "unit: isolated tests (no DB, no network)",
+    "integration: tests that need Postgres, docker, or real I/O",
 ]

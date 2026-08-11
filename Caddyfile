@@ -1,0 +1,78 @@
+{
+	email {$ACME_EMAIL}
+
+	log {
+		output stdout
+		format append {
+			service caddy
+			environment production
+			version {$APP_VERSION}
+			wrap json {
+				time_key timestamp
+				name_key logger
+				message_key event
+			}
+		}
+	}
+
+	servers {
+		timeouts {
+			read_body 2m
+			read_header 10s
+			write 2m
+			idle 5m
+		}
+		max_header_size 32KB
+	}
+}
+
+{$APP_DOMAIN} {
+	log {
+		output stdout
+		format append {
+			service caddy
+			environment production
+			version {$APP_VERSION}
+			wrap filter {
+				# Preserve method/status/duration/size, but log the path in a
+				# dedicated field and remove the URI/query plus every header.
+				request>uri delete
+				request>headers delete
+				wrap json {
+					time_key timestamp
+					name_key logger
+					message_key event
+				}
+			}
+		}
+	}
+
+	# Health probes are intentionally silent. Failures remain visible through
+	# provider alerts, container health, and the API's 503 lifecycle event.
+	@routine_health path /health /ready
+	log_skip @routine_health
+
+	# Capture bounded request metadata before any handler can rewrite it. Never
+	# append body or response content placeholders in production.
+	log_append <path {http.request.uri.path}
+	log_append <request_size {http.request.header.Content-Length}
+
+	# The application accepts files up to 20 MiB. The proxy allowance includes
+	# multipart framing while still rejecting unbounded request bodies.
+	request_body {
+		max_size 24MB
+	}
+
+	encode zstd gzip
+
+	header {
+		-Server
+	}
+
+	reverse_proxy api:8000 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 2m
+		}
+	}
+}

@@ -1,0 +1,19 @@
+# Allowlist the production build context. Local configuration, source-control
+# metadata, tests, caches, PGNs, IDE files, and generated artifacts stay outside.
+**
+
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!alembic.ini
+
+!app/
+!app/**
+!alembic/
+!alembic/**
+!scripts/
+!scripts/download_eco.py

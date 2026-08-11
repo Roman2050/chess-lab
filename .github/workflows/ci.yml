@@ -1,0 +1,365 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chess
+          POSTGRES_PASSWORD: chess
+          POSTGRES_DB: chess_lab_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U chess -d chess_lab_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --dev
+
+      - name: Build local ECO dictionary
+        run: uv run --no-sync python scripts/download_eco.py
+
+      - name: Lint Python source
+        run: uv run --no-sync ruff check app tests scripts
+
+      - name: Check Python formatting
+        run: uv run --no-sync ruff format --check app tests scripts
+
+      - name: Enforce Lichess HTTP boundary
+        run: uv run --no-sync python scripts/check_lichess_http_boundary.py
+
+      - name: Run automated test suite
+        run: uv run --no-sync pytest
+
+      - name: Resolve image identity
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          version="$(uv run --no-sync python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=chess-lab-ci:${revision}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build release image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          tags: ${{ steps.image.outputs.tag }}
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_REVISION=${{ steps.image.outputs.revision }}
+            OCI_VERSION=${{ steps.image.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check container imports and release metadata
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          EXPECTED_REVISION: ${{ steps.image.outputs.revision }}
+          EXPECTED_VERSION: ${{ steps.image.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${IMAGE_TAG}")" = "${EXPECTED_REVISION}"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${IMAGE_TAG}")" = "${EXPECTED_VERSION}"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' "${IMAGE_TAG}")" = "GPL-3.0-or-later"
+          docker run --rm \
+            --entrypoint python \
+            --env DB_HOST=db \
+            --env DB_PORT=5432 \
+            --env DB_USER=chess \
+            --env DB_PASSWORD=ci-only-database-password \
+            --env DB_NAME=chess_lab_ci \
+            --env MVP_API_KEY=ci-only-operator-key-000000000000 \
+            --env 'LICHESS_USER_AGENT=ChessLab-CI/0.1 (+https://github.com/Roman2050/chess-lab)' \
+            "${IMAGE_TAG}" \
+            -c 'from importlib.metadata import version; from pathlib import Path; import app.main; assert version("chess-lab") == app.main.APP_VERSION; assert Path("/app/data/eco.json").is_file(); assert Path("/usr/local/bin/stockfish").is_file()'
+
+      - name: Smoke-test container health endpoint
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach \
+            --publish 127.0.0.1:18000:8000 \
+            --env DB_HOST=db \
+            --env DB_PORT=5432 \
+            --env DB_USER=chess \
+            --env DB_PASSWORD=ci-only-database-password \
+            --env DB_NAME=chess_lab_ci \
+            --env MVP_API_KEY=ci-only-operator-key-000000000000 \
+            --env 'LICHESS_USER_AGENT=ChessLab-CI/0.1 (+https://github.com/Roman2050/chess-lab)' \
+            "${IMAGE_TAG}")"
+          cleanup() {
+            docker logs "${container_id}" || true
+            docker rm --force "${container_id}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18000/health \
+              | grep --fixed-strings '"status":"ok"' >/dev/null; then
+              exit 0
+            fi
+            if test "$(docker inspect --format '{{.State.Running}}' "${container_id}")" != "true"; then
+              exit 1
+            fi
+            sleep 1
+          done
+          exit 1
+
+  publish-ghcr:
+    if: ${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+    needs: verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release identity
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z; got ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+          version="${RELEASE_TAG#v}"
+          package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if test "${version}" != "${package_version}"; then
+            echo "Release ${RELEASE_TAG} does not match project version ${package_version}" >&2
+            exit 1
+          fi
+
+          revision="$(git rev-parse HEAD)"
+          main_ref="refs/remotes/origin/main"
+          if ! git show-ref --verify --quiet "${main_ref}"; then
+            echo "Remote main branch is unavailable in the release checkout" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${revision}" "${main_ref}"; then
+            echo "Release commit ${revision} is not contained in main" >&2
+            exit 1
+          fi
+
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable image tags
+        id: push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.release.outputs.image }}:${{ steps.release.outputs.tag }}
+            ${{ steps.release.outputs.image }}:${{ steps.release.outputs.revision }}
+          labels: |
+            org.opencontainers.image.title=Chess Lab
+            org.opencontainers.image.description=Bulk chess game analysis and opponent scouting with Stockfish-backed insights.
+            org.opencontainers.image.source=${{ steps.release.outputs.source }}
+            org.opencontainers.image.revision=${{ steps.release.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+          build-args: |
+            OCI_SOURCE=${{ steps.release.outputs.source }}
+            OCI_REVISION=${{ steps.release.outputs.revision }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest image provenance
+        if: ${{ github.event.repository.visibility == 'public' }}
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.release.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify published tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect \
+            "${{ steps.release.outputs.image }}:${{ steps.release.outputs.tag }}"
+          docker buildx imagetools inspect \
+            "${{ steps.release.outputs.image }}:${{ steps.release.outputs.revision }}"
+
+  publish-bootstrap-ghcr:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out main commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate bootstrap identity
+        id: bootstrap
+        shell: bash
+        env:
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if test "${EVENT_REF}" != "refs/heads/main"; then
+            echo "Bootstrap publication must be dispatched from main; got ${EVENT_REF}" >&2
+            exit 1
+          fi
+          if [[ ! "${EVENT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Bootstrap revision must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+
+          revision="$(git rev-parse HEAD)"
+          if test "${revision}" != "${EVENT_SHA}"; then
+            echo "Checked-out revision ${revision} does not match event SHA ${EVENT_SHA}" >&2
+            exit 1
+          fi
+
+          main_ref="refs/remotes/origin/main"
+          if ! git show-ref --verify --quiet "${main_ref}"; then
+            echo "Remote main branch is unavailable in the bootstrap checkout" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${revision}" "${main_ref}"; then
+            echo "Bootstrap commit ${revision} is not contained in main" >&2
+            exit 1
+          fi
+
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish SHA-only bootstrap image
+        id: push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.bootstrap.outputs.image }}:${{ steps.bootstrap.outputs.revision }}
+          labels: |
+            org.opencontainers.image.title=Chess Lab
+            org.opencontainers.image.description=Bulk chess game analysis and opponent scouting with Stockfish-backed insights.
+            org.opencontainers.image.source=${{ steps.bootstrap.outputs.source }}
+            org.opencontainers.image.revision=${{ steps.bootstrap.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.bootstrap.outputs.version }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+          build-args: |
+            OCI_SOURCE=${{ steps.bootstrap.outputs.source }}
+            OCI_REVISION=${{ steps.bootstrap.outputs.revision }}
+            OCI_VERSION=${{ steps.bootstrap.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest bootstrap image provenance
+        if: ${{ github.event.repository.visibility == 'public' }}
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.bootstrap.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify published SHA tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect \
+            "${{ steps.bootstrap.outputs.image }}:${{ steps.bootstrap.outputs.revision }}"

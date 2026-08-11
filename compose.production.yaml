@@ -1,0 +1,256 @@
+name: chess-lab-production
+
+x-bounded-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-service: &app-service
+  image: ${CHESS_LAB_IMAGE:?Set CHESS_LAB_IMAGE to an immutable GHCR tag or digest}
+  env_file:
+    - path: ${PRODUCTION_ENV_FILE:-.env.production}
+      required: true
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  logging: *bounded-logging
+  networks:
+    - backend
+
+x-app-dependencies: &app-dependencies
+  db:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL to a monitored operator address}
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN to the public API hostname}
+      APP_VERSION: ${APP_VERSION:?Set APP_VERSION to the deployed image version}
+    ports:
+      - target: 80
+        published: "80"
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: "443"
+        protocol: tcp
+        mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging: *bounded-logging
+    stop_grace_period: 30s
+    networks:
+      proxy:
+        ipv4_address: ${CADDY_PROXY_IPV4:-172.30.0.2}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: 128M
+
+  api:
+    <<: *app-service
+    environment:
+      LOG_SERVICE: api
+    command:
+      - uvicorn
+      - app.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --proxy-headers
+      # The only trusted forwarded-header source is Caddy's fixed address on
+      # the isolated proxy network. Uvicorn is not published on the host.
+      - --forwarded-allow-ips=${CADDY_PROXY_IPV4:-172.30.0.2}
+      - --no-access-log
+    expose:
+      - "8000"
+    depends_on: *app-dependencies
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).read()
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 30s
+    networks:
+      proxy:
+        ipv4_address: ${API_PROXY_IPV4:-172.30.0.3}
+      backend: null
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 512M
+
+  migrate:
+    <<: *app-service
+    environment:
+      LOG_SERVICE: migrate
+    command: ["alembic", "upgrade", "head"]
+    profiles: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    # The shared image's default healthcheck targets the API port. This
+    # one-shot role has no HTTP server.
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  worker-analysis:
+    <<: *app-service
+    environment:
+      LOG_SERVICE: worker-analysis
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app.celery_app
+      - worker
+      - --queues=analysis
+      - --concurrency=${ANALYSIS_WORKER_CONCURRENCY:-1}
+      - --loglevel=INFO
+      - --hostname=analysis@%h
+    depends_on: *app-dependencies
+    # Celery has no HTTP endpoint; readiness is broker/queue observability, not
+    # the API healthcheck inherited from the shared image.
+    healthcheck:
+      disable: true
+    stop_grace_period: 30m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+  worker-reports:
+    <<: *app-service
+    environment:
+      LOG_SERVICE: worker-reports
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app.celery_app
+      - worker
+      - --queues=reports
+      - --concurrency=${REPORTS_WORKER_CONCURRENCY:-1}
+      - --loglevel=INFO
+      - --hostname=reports@%h
+    depends_on: *app-dependencies
+    healthcheck:
+      disable: true
+    stop_grace_period: 15m
+    networks:
+      - backend
+      - egress
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 512M
+
+  db:
+    image: postgres:16.14-alpine3.23
+    command: ["postgres", "-c", "log_statement=none", "-c", "log_min_messages=warning"]
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME in .env.production}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.production}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in .env.production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    restart: unless-stopped
+    logging: *bounded-logging
+    stop_grace_period: 1m
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 768M
+
+  redis:
+    image: redis:7.4.10-alpine3.21
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *bounded-logging
+    stop_grace_period: 30s
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: 256M
+
+networks:
+  # Only Caddy and Uvicorn share this network. The fixed Caddy address is the
+  # complete Uvicorn forwarded-header trust boundary.
+  proxy:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.0.0/24}
+  # Database and broker traffic cannot be routed outside Docker.
+  backend:
+    internal: true
+  # The reports worker needs outbound HTTPS for the external LLM provider, but
+  # it is deliberately absent from the proxy network.
+  egress: {}
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
