@@ -796,14 +796,15 @@ safe upstream error mapping, and structured lifecycle observability. Coordinate 
 API processes through a deployment-wide Redis lock and cooldown so only one Lichess
 export is active and upstream rate limits are respected.
 
-**Phase 8 — Production Deployment and Portfolio Release — In Progress**
+**Phase 8 — Production Deployment and Portfolio Release — Completed**
 Package the completed backend as a reproducible OCI image and publish immutable,
 traceable releases through GHCR. Deploy the API, isolated Celery workers, PostgreSQL,
 and Redis behind Caddy on a single VPS; document deployment, backup, rollback, and
 recovery; and expose a safe read-only demo with bounded structured observability and
-portfolio documentation. The verified bootstrap deployment and demo are live; portfolio
-visuals, the final `v0.1.0` release, and production alignment to its exact image digest
-remain before the phase can be marked complete.
+portfolio documentation. The public `v0.1.0` release, portfolio visuals, anonymous GHCR
+pull, and production deployment of the exact release digest are verified. The original
+bootstrap digest remains available as the rollback target for the release observation
+window.
 
 ---
 

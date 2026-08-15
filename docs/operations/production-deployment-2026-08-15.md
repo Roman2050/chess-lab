@@ -13,16 +13,19 @@ heartbeat URLs, raw PGN files, and mappings between real players and public alia
 - Published host ports: `80/tcp` and `443/tcp`; SSH is separately source-restricted
 - PostgreSQL, Redis, and Uvicorn: internal-only Compose networking
 - Application version: `0.1.0`
-- OCI source revision: `b48dc4f073cad24be746a8a55a36fd4244d6d115`
-- Bootstrap image:
+- OCI source revision: `92b688549c2598541b890050c7841a3529086e02`
+- Release image:
+  `ghcr.io/roman2050/chess-lab@sha256:baf6754825e5d909340b968456e2124661e37a40de267536866ff9e9023199a4`
+- Bootstrap rollback image:
   `ghcr.io/roman2050/chess-lab@sha256:9d18df61dca018987bbf77a69c9e0835a89d9fb146ab61d73b004f8bf8b51eff`
 - Image architecture: `amd64`
 - Alembic revision: `e2f4a6b8c0d1`
 
-The explicit bootstrap digest was pulled anonymously, inspected for its OCI labels and
-architecture, deployed, and exercised through the production smoke. After the final
-`v0.1.0` image replaces it, retain this digest as the verified rollback application
-target for the release observation window.
+The `v0.1.0` tag and full source-revision tag resolve to the same release digest. The
+image was pulled anonymously, inspected for its OCI revision, version, license, source,
+and `amd64` architecture, then deployed by exact digest. The bootstrap digest remains
+locally available as the verified rollback application target for the release
+observation window.
 
 ## DNS and TLS
 
@@ -106,10 +109,16 @@ The operator password manager is the recovery source for secret material. This d
 is evidence of configuration and verification, not a substitute for that recovery data
 or for a current restore drill.
 
-## Release handoff
+## Release completion
 
-The next release step is to add portfolio README content and sanitized visuals, merge the
-final documentation through review, publish GitHub Release `v0.1.0`, record its GHCR
-digest and OCI revision, update production to that exact digest, repeat the production
-smoke, and preserve the bootstrap digest above as the rollback target during the
-observation window.
+GitHub Release `v0.1.0` was published from source revision
+`92b688549c2598541b890050c7841a3529086e02`, and its release workflow published the
+version and full-revision GHCR tags with provenance. Anonymous pulls of both tags
+resolved to the recorded release digest. A fresh encrypted off-server backup completed
+before the controlled update; workers were idle and both Redis queues were empty.
+
+The one-shot migration completed at Alembic revision `e2f4a6b8c0d1`. API and worker
+containers were recreated from the exact release digest, all long-lived services became
+healthy, and smoke checks from both the VPS and an external client returned `200` for
+health, readiness, service metadata, OpenAPI, Swagger, demo discovery, analyzed games,
+analysis status, statistics, opening and move breakdowns, and the cached English report.
