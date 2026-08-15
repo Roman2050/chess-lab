@@ -390,6 +390,8 @@ chess-lab/
 │   ├── check_db.py            # Quick DB connectivity check
 │   └── check_lichess_http_boundary.py  # Static outbound-client ownership guard
 ├── docs/
+│   ├── operations/
+│   │   └── production-deployment-2026-08-15.md  # Sanitized first-deploy evidence
 │   └── runbooks/
 │       ├── deployment.md      # Ubuntu VPS bootstrap, deploy, update, rollback
 │       ├── dns-tls.md         # DNS, Caddy ACME, direct TLS and renewal checks
@@ -799,7 +801,9 @@ Package the completed backend as a reproducible OCI image and publish immutable,
 traceable releases through GHCR. Deploy the API, isolated Celery workers, PostgreSQL,
 and Redis behind Caddy on a single VPS; document deployment, backup, rollback, and
 recovery; and expose a safe read-only demo with bounded structured observability and
-portfolio documentation.
+portfolio documentation. The verified bootstrap deployment and demo are live; portfolio
+visuals, the final `v0.1.0` release, and production alignment to its exact image digest
+remain before the phase can be marked complete.
 
 ---
 

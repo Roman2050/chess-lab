@@ -187,6 +187,8 @@ After=docker.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/chess-lab-backup
+# Add only after installing and testing the root-only helper from observability.md.
+ExecStartPost=/usr/local/sbin/chess-lab-heartbeat backup
 User=root
 Group=root
 Nice=10
@@ -223,8 +225,21 @@ sudo systemctl list-timers chess-lab-backup.timer
 ```
 
 The job fails if `pg_dump`, archive listing, upload, download, or checksum verification
-fails. Alert on a failed unit and on absence of `backup.completed` for 26 hours. Never log
-the rclone config or run `rclone config show` into shared output.
+fails. `ExecStartPost` runs only after the backup command succeeds; configure its
+external heartbeat for a 24-hour period plus two-hour grace. Install and test the
+root-only URL files and helper from [observability.md](observability.md#root-only-heartbeat-helper)
+before adding that line. If external monitoring is not ready during bootstrap, omit the
+line temporarily, but the production backup alert is incomplete until it is present and
+a service run records both events:
+
+```text
+backup.completed utc=<timestamp> object=daily/<archive>
+heartbeat.sent target=backup
+```
+
+Alert on a failed unit and on absence of either verified success signal for 26 hours.
+Never log the rclone config, heartbeat URL, or output from `rclone config show` into
+shared output.
 
 ## Read-only backup audit
 
